@@ -3367,14 +3367,30 @@ export default function CouponsLabelsSettings() {
                     <span className={cn(
                       "px-2 py-0.5 rounded text-[8.5px] uppercase font-black truncate max-w-[150px]",
                       (() => {
-                        const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                        const localDocIdMap = {
+                          reciboTermico: 'thermal_receipt',
+                          cupomPedido: 'order_ticket',
+                          etiqueta: 'labels',
+                          etiquetaLote: 'bulk_labels',
+                          mensagemCliente: 'customer_experience',
+                        };
+                        const mappedId = localDocIdMap[activeTab];
+                        const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                         const printer = binding ? futurePrinters.find(p => p.id === binding.printerId) : null;
                         if (!printer) return "bg-zinc-900 text-zinc-500";
                         return printer.status === 'ativa' ? "bg-emerald-500/10 text-emerald-400" : "bg-rose-500/10 text-rose-400";
                       })()
                     )}>
                       {(() => {
-                        const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                        const localDocIdMap = {
+                          reciboTermico: 'thermal_receipt',
+                          cupomPedido: 'order_ticket',
+                          etiqueta: 'labels',
+                          etiquetaLote: 'bulk_labels',
+                          mensagemCliente: 'customer_experience',
+                        };
+                        const mappedId = localDocIdMap[activeTab];
+                        const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                         const printer = binding ? futurePrinters.find(p => p.id === binding.printerId) : null;
                         if (!printer) return 'Não configurada';
                         return `${printer.name} (${printer.status === 'ativa' ? 'Online' : 'Offline'})`;
@@ -3388,14 +3404,30 @@ export default function CouponsLabelsSettings() {
                     <span className={cn(
                       "px-2 py-0.5 rounded text-[8.5px] uppercase font-black text-right truncate max-w-[180px]",
                       (() => {
-                        const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                        const localDocIdMap = {
+                          reciboTermico: 'thermal_receipt',
+                          cupomPedido: 'order_ticket',
+                          etiqueta: 'labels',
+                          etiquetaLote: 'bulk_labels',
+                          mensagemCliente: 'customer_experience',
+                        };
+                        const mappedId = localDocIdMap[activeTab];
+                        const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                         if (!binding) return "bg-zinc-900 text-zinc-500";
                         if (binding.printerId === 'pdf-manual') return "bg-blue-500/10 text-blue-400";
                         return "bg-emerald-500/10 text-emerald-400";
                       })()
                     )}>
                       {(() => {
-                        const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                        const localDocIdMap = {
+                          reciboTermico: 'thermal_receipt',
+                          cupomPedido: 'order_ticket',
+                          etiqueta: 'labels',
+                          etiquetaLote: 'bulk_labels',
+                          mensagemCliente: 'customer_experience',
+                        };
+                        const mappedId = localDocIdMap[activeTab];
+                        const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                         if (!binding) return 'Pendente';
                         if (binding.printerId === 'pdf-manual') return 'PDF Manual';
                         return 'Habilitada (Spooler)';
@@ -3419,7 +3451,15 @@ export default function CouponsLabelsSettings() {
                   <div className={cn(
                     "w-2 h-2 rounded-full",
                     (() => {
-                      const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                      const localDocIdMap = {
+                        reciboTermico: 'thermal_receipt',
+                        cupomPedido: 'order_ticket',
+                        etiqueta: 'labels',
+                        etiquetaLote: 'bulk_labels',
+                        mensagemCliente: 'customer_experience',
+                      };
+                      const mappedId = localDocIdMap[activeTab];
+                      const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                       const printer = binding ? futurePrinters.find(p => p.id === binding.printerId) : null;
                       if (!printer) return "bg-zinc-600";
                       return printer.status === 'ativa' ? "bg-emerald-500" : "bg-rose-500";
@@ -3427,7 +3467,15 @@ export default function CouponsLabelsSettings() {
                   )} />
                   <span className="font-bold uppercase tracking-wide">
                     {(() => {
-                      const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                      const localDocIdMap = {
+                        reciboTermico: 'thermal_receipt',
+                        cupomPedido: 'order_ticket',
+                        etiqueta: 'labels',
+                        etiquetaLote: 'bulk_labels',
+                        mensagemCliente: 'customer_experience',
+                      };
+                      const mappedId = localDocIdMap[activeTab];
+                      const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                       const printer = binding ? futurePrinters.find(p => p.id === binding.printerId) : null;
                       if (!printer) return 'Sem impressora vinculada';
                       return `Impressora: ${printer.name}`;
@@ -3437,7 +3485,15 @@ export default function CouponsLabelsSettings() {
 
                 <span className="text-[9px] font-bold text-zinc-500 font-mono">
                   {(() => {
-                    const binding = documentPrinterBindings.find(b => b.documentId === activeTab);
+                    const localDocIdMap = {
+                      reciboTermico: 'thermal_receipt',
+                      cupomPedido: 'order_ticket',
+                      etiqueta: 'labels',
+                      etiquetaLote: 'bulk_labels',
+                      mensagemCliente: 'customer_experience',
+                    };
+                    const mappedId = localDocIdMap[activeTab];
+                    const binding = documentPrinterBindings.find(b => b.documentId === mappedId);
                     const printer = binding ? futurePrinters.find(p => p.id === binding.printerId) : null;
                     if (!printer) return 'INDEFINIDO';
                     return printer.status === 'ativa' ? 'ONLINE' : 'OFFLINE';

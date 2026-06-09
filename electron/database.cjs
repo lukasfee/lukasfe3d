@@ -1099,6 +1099,28 @@ function saveBackupFile(userDataPath, backupId, backupDataObj) {
         version: backupDataObj.version || '1.0.0',
         description: backupDataObj.description || ''
       });
+
+      // Prune old automatic backups (keep last 50)
+      if ((backupDataObj.type || 'auto') === 'auto') {
+        try {
+          const selectStmt = db.prepare("SELECT * FROM system_backups_metadata WHERE type = 'auto' ORDER BY createdAt DESC");
+          const autoBackups = selectStmt.all();
+          if (autoBackups.length > 50) {
+            const toDelete = autoBackups.slice(50);
+            const deleteStmt = db.prepare("DELETE FROM system_backups_metadata WHERE id = ?");
+            for (const b of toDelete) {
+              const p = path.join(backupsPath, b.filename);
+              if (fs.existsSync(p)) {
+                fs.unlinkSync(p);
+              }
+              deleteStmt.run(b.id);
+            }
+            console.log(`[SQLite-RETENTION] Prunados ${toDelete.length} backups automáticos antigos no Desktop.`);
+          }
+        } catch (rotErr) {
+          console.error('[SQLite-RETENTION] Erro ao aplicar retenção:', rotErr);
+        }
+      }
     }
 
     return { success: true, filename, size };

@@ -85,6 +85,7 @@ export default function PDVModule() {
   const [selectedDeliveryMethodId, setSelectedDeliveryMethodId] = useState<string>('');
   const [copiedPix, setCopiedPix] = useState(false);
   const [isQuickClientModalOpen, setIsQuickClientModalOpen] = useState(false);
+  const [destination, setDestination] = useState<'gestao-pedidos' | 'em-producao'>('gestao-pedidos');
   
   const [isLocked, setIsLocked] = useState(false);
   const [lockPassword, setLockPassword] = useState('');
@@ -314,37 +315,70 @@ export default function PDVModule() {
     }
   };
 
-  const addToCart = (product: typeof products[0]) => {
+  const [selectedProductForVariation, setSelectedProductForVariation] = useState<typeof products[0] | null>(null);
+
+  const addToCart = (product: typeof products[0], variation?: any) => {
     if (!currentCashier) return;
+
+    if (product.variations && product.variations.length > 0 && !variation) {
+      if (product.variations.length === 1) {
+        addToCart(product, product.variations[0]);
+        return;
+      }
+      setSelectedProductForVariation(product);
+      return;
+    }
     
     setCart(prev => {
-      const existing = prev.find(item => item.id === product.id);
+      const existing = prev.find(item => 
+        item.id === product.id && 
+        item.selectedVariationId === variation?.id
+      );
       const currentQty = existing ? existing.quantity : 0;
       
-      if (currentQty + 1 > product.stock) {
-        alert('Estoque insuficiente para este produto.');
+      const maxAllowedStock = variation ? variation.stock : product.stock;
+      if (currentQty + 1 > maxAllowedStock) {
+        alert(`Estoque insuficiente. Disponível para esta variação: ${maxAllowedStock} un.`);
         return prev;
       }
 
       if (existing) {
         return prev.map(item => 
-          item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item
+          (item.id === product.id && item.selectedVariationId === variation?.id)
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
         );
       }
-      return [...prev, { ...product, quantity: 1 }];
+
+      const cartItem: CartItem = {
+        ...product,
+        name: variation ? `${product.name} (${variation.name})` : product.name,
+        price: variation?.price !== undefined ? variation.price : product.price,
+        code: variation?.sku || product.code,
+        selectedVariationId: variation?.id,
+        selectedVariationName: variation?.name,
+        selectedVariationSku: variation?.sku,
+        quantity: 1
+      };
+      
+      return [...prev, cartItem];
     });
     setSearchTerm('');
   };
 
-  const updateQuantity = (id: string, delta: number) => {
+  const updateQuantity = (id: string, variationId: string | undefined, delta: number) => {
     const product = products.find(p => p.id === id);
     if (!product) return;
 
     setCart(prev => prev.map(item => {
-      if (item.id === id) {
+      if (item.id === id && item.selectedVariationId === variationId) {
         const newQty = Math.max(1, item.quantity + delta);
-        if (newQty > product.stock) {
-          alert('Estoque insuficiente.');
+        const maxStock = item.selectedVariationId && product.variations 
+          ? (product.variations.find(v => v.id === item.selectedVariationId)?.stock ?? product.stock)
+          : product.stock;
+
+        if (newQty > maxStock) {
+          alert(`Estoque máximo atingido (${maxStock} un).`);
           return item;
         }
         return { ...item, quantity: newQty };
@@ -353,8 +387,8 @@ export default function PDVModule() {
     }));
   };
 
-  const removeItem = (id: string) => {
-    setCart(prev => prev.filter(item => item.id !== id));
+  const removeItem = (id: string, variationId: string | undefined) => {
+    setCart(prev => prev.filter(item => !(item.id === id && item.selectedVariationId === variationId)));
   };
 
   const handleQuickClientSubmit = () => {
@@ -441,6 +475,10 @@ export default function PDVModule() {
       sellerLogin: seller.login,
       deliveryMethodId: selectedDeliveryMethodId,
       deliveryMethodName: deliveryMethods.find(m => m.id === selectedDeliveryMethodId)?.name || '',
+      status: (destination === 'em-producao' ? 'em_producao' : 'aguardando_separacao') as any,
+      productionStatus: (destination === 'em-producao' ? 'em_fila' : undefined) as any,
+      productionPriority: (destination === 'em-producao' ? 'media' : undefined) as any,
+      origin: 'PDV' as const,
     };
 
     const newSale = addSale(saleData);
@@ -452,6 +490,7 @@ export default function PDVModule() {
     }
     
     // Clear everything
+    setDestination('gestao-pedidos');
     setCart([]);
     setDiscount(0);
     setPayments([]);
@@ -654,13 +693,13 @@ export default function PDVModule() {
                         <div className="col-span-3 md:col-span-2 flex items-center justify-center">
                           <div className="flex items-center gap-1 bg-black/40 border border-white/5 rounded-lg p-0.5 shadow-inner">
                             <button 
-                              onClick={() => updateQuantity(item.id, -1)}
+                              onClick={() => updateQuantity(item.id, item.selectedVariationId, -1)}
                               className="w-4 h-4 md:w-5 md:h-5 flex items-center justify-center text-white/20 hover:text-white hover:bg-white/5 rounded transition-all">
                               <Minus className="w-2.5 h-2.5 md:w-3 md:h-3" />
                             </button>
                             <span className="text-[9px] md:text-[11px] font-mono font-bold text-white min-w-[16px] md:min-w-[24px] text-center">{item.quantity}</span>
                             <button 
-                              onClick={() => updateQuantity(item.id, 1)}
+                              onClick={() => updateQuantity(item.id, item.selectedVariationId, 1)}
                               className="w-4 h-4 md:w-5 md:h-5 flex items-center justify-center text-emerald-500/40 hover:text-emerald-400 hover:bg-emerald-500/10 rounded transition-all">
                               <Plus className="w-2.5 h-2.5 md:w-3 md:h-3" />
                             </button>
@@ -672,7 +711,7 @@ export default function PDVModule() {
                         <div className="col-span-2 md:col-span-3 text-right flex items-center justify-end gap-1.5 md:gap-3 pr-1 md:pr-4">
                           <span className="text-[8px] md:text-[10px] font-mono font-black text-emerald-400">R$ {(item.price * item.quantity).toFixed(2)}</span>
                           <button 
-                            onClick={() => removeItem(item.id)}
+                            onClick={() => removeItem(item.id, item.selectedVariationId)}
                             className="p-1 text-red-500/60 md:text-white/0 md:group-hover:text-red-500/40 hover:text-red-500 transition-colors">
                             <Trash2 className="w-3 h-3 md:w-3.5 md:h-3.5" />
                           </button>
@@ -898,6 +937,37 @@ export default function PDVModule() {
                </div>
              </div>
 
+             {/* Order Destination Selector */}
+             <div className="bg-white/[0.03] border border-white/5 rounded-2xl p-3 space-y-2 mb-3 mt-4">
+               <span className="text-[10px] font-black uppercase text-white/50 tracking-wider block">Destino do Pedido:</span>
+               <div className="grid grid-cols-2 gap-2">
+                 <button
+                   type="button"
+                   onClick={() => setDestination('gestao-pedidos')}
+                   className={cn(
+                     "py-2 px-1 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border cursor-pointer",
+                     destination === 'gestao-pedidos'
+                       ? "bg-emerald-600/10 text-emerald-400 border-emerald-500/30"
+                       : "bg-white/5 text-slate-400 border-transparent hover:text-white hover:bg-white/10"
+                   )}
+                 >
+                   Gestão Comum
+                 </button>
+                 <button
+                   type="button"
+                   onClick={() => setDestination('em-producao')}
+                   className={cn(
+                     "py-2 px-1 rounded-xl text-[9px] font-black uppercase tracking-wider transition-all border cursor-pointer",
+                     destination === 'em-producao'
+                       ? "bg-amber-600/10 text-amber-400 border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                       : "bg-white/5 text-slate-400 border-transparent hover:text-white hover:bg-white/10"
+                   )}
+                 >
+                   Em Produção
+                 </button>
+               </div>
+             </div>
+
              {/* Action Buttons */}
              <div className="mt-auto space-y-3">
                 <button 
@@ -1055,6 +1125,99 @@ export default function PDVModule() {
                     <X className="w-4 h-4" />
                   </button>
                </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* MODAL DE SELEÇÃO DE VARIAÇÃO (EXIGÊNCIA DE SELEÇÃO PDV / WMS) */}
+      <AnimatePresence>
+        {selectedProductForVariation && (
+          <div className="fixed inset-0 z-[150] flex items-center justify-center p-4 bg-black/85 backdrop-blur-sm">
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md bg-[#0F0F11] border border-zinc-800/60 rounded-3xl p-6 shadow-2xl relative overflow-hidden"
+            >
+              {/* Top Title */}
+              <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 bg-amber-500/10 rounded-lg">
+                    <Package className="w-4 h-4 text-amber-500" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-black uppercase text-zinc-500 tracking-wider">Grau de Variação</h3>
+                    <h2 className="text-sm font-bold text-white truncate max-w-[240px] uppercase leading-none mt-1">
+                      {selectedProductForVariation.name}
+                    </h2>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelectedProductForVariation(null)}
+                  className="p-1.5 hover:bg-white/5 rounded-xl text-zinc-500 hover:text-white transition-all"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Info text */}
+              <p className="text-[10px] text-zinc-500 mb-4 font-sans font-medium leading-relaxed">
+                Este item possui variações físicas registradas no sistema. Por favor, selecione qual variação deseja adicionar ao carrinho:
+              </p>
+
+              {/* Variations Grid */}
+              <div className="space-y-2 max-h-[250px] overflow-y-auto pr-1 mb-6 custom-scrollbar">
+                {selectedProductForVariation.variations?.map((v) => {
+                  const hasStock = v.stock > 0;
+                  const priceToDisplay = v.price !== undefined ? v.price : selectedProductForVariation.price;
+                  return (
+                    <button
+                      key={v.id}
+                      type="button"
+                      disabled={!hasStock}
+                      onClick={() => {
+                        addToCart(selectedProductForVariation, v);
+                        setSelectedProductForVariation(null);
+                      }}
+                      className={`w-full text-left p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                        hasStock
+                          ? 'bg-zinc-900/40 hover:bg-zinc-900 border-zinc-800/60 hover:border-amber-500/30 text-white cursor-pointer group'
+                          : 'bg-zinc-950/20 border-zinc-900/40 text-zinc-600 cursor-not-allowed opacity-40'
+                      }`}
+                    >
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold uppercase transition-colors group-hover:text-amber-400">
+                          {v.name}
+                        </p>
+                        <p className="text-[8.5px] font-mono tracking-wider font-extrabold text-zinc-500 mt-1 uppercase">
+                          SKU: {v.sku}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        <p className="text-xs font-mono font-black text-emerald-400">
+                          R$ {priceToDisplay.toFixed(2)}
+                        </p>
+                        <p className={`text-[8.5px] font-bold uppercase mt-1 ${hasStock ? 'text-zinc-400' : 'text-rose-500 font-extrabold'}`}>
+                          {hasStock ? `Estoque: ${v.stock} un` : 'Sem estoque'}
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Bottom footer bar */}
+              <div className="flex items-center justify-end border-t border-zinc-800/60 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setSelectedProductForVariation(null)}
+                  className="px-4 py-2 text-[10px] uppercase font-black tracking-wider text-zinc-400 hover:text-white transition-all"
+                >
+                  Cancelar
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

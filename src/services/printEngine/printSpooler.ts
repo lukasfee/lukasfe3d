@@ -145,7 +145,60 @@ async function processNextJob() {
 
               console.log(`[PRINT-SPOOLER] Dispatching standalone canonical PDF via base64. Document: ${nextJob.documentName}, Job: ${nextJob.id}, Width: ${geom.paperWidthMm}mm, Height: ${geom.paperHeightMm}mm`);
 
-              if (
+              const isUsingAdvancedMode = nextJob.printPipeline === 'windows_advanced' || nextJob.advancedModeEnabled;
+              let useAdvancedBridge = false;
+
+              if (isUsingAdvancedMode) {
+                const isAdvancedBridgeAvailable = (window as any).electron && 
+                  typeof (window as any).electron.printAdvancedJob === 'function';
+                
+                if (isAdvancedBridgeAvailable) {
+                  useAdvancedBridge = true;
+                } else {
+                  console.warn(`[PRINT-SPOOLER] Advanced Windows Pipeline is configured for ${nextJob.documentName}, but native advanced bridge is not installed. Falling back to safe Electron/PDF mode.`);
+                  alert(`[ERP Nexa - Alerta de Pipeline]\n\nModo Avançado Windows configurado para "${nextJob.documentName}", mas a bridge nativa ainda não está instalada.\n\nUsando modo Electron/PDF de segurança.`);
+                }
+              }
+
+              if (useAdvancedBridge) {
+                const res = await (window as any).electron.printAdvancedJob({
+                  printerId: nextJob.printerId,
+                  printerName: nextJob.printerName,
+                  driverPaperName: nextJob.driverPaperName,
+                  orientation: nextJob.orientation,
+                  marginMm: nextJob.marginMm,
+                  scale: nextJob.scale,
+                  safeMode: nextJob.safeMode,
+                  pdfBase64: base64Data,
+                  paperWidthMm: geom.paperWidthMm,
+                  paperHeightMm: geom.paperHeightMm,
+                  jobId: nextJob.id,
+                  documentName: nextJob.documentName,
+                  // Advanced Settings
+                  copies: nextJob.copies,
+                  dpi: nextJob.dpi,
+                  paperSource: nextJob.paperSource,
+                  colorMode: nextJob.colorMode,
+                  duplexMode: nextJob.duplexMode,
+                  mediaType: nextJob.mediaType,
+                  printQuality: nextJob.printQuality
+                });
+
+                if (res && res.success) {
+                  updatePrintJobStatus(nextJob.id, 'impresso');
+                  resolve();
+                } else {
+                  const errorMsg = res?.error || 'Erro desconhecido na bridge avançada .NET/Windows.';
+                  console.error('[PRINT-SPOOLER] Advanced print error, falling back:', errorMsg);
+                  // Let it trigger secure PDF download fallback
+                  if (blob) {
+                    await downloadOrSharePdf(blob, nextJob.documentName);
+                    updatePrintJobStatus(nextJob.id, 'impresso', errorMsg);
+                    alert(`Erro na Bridge Avançada:\n${errorMsg}\n\nO PDF foi gerado e baixado automaticamente.`);
+                  }
+                  resolve();
+                }
+              } else if (
                 (window as any).electron &&
                 typeof (window as any).electron.printPdf === 'function'
               ) {

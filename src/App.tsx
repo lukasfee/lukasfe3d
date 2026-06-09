@@ -1,4 +1,5 @@
 import { HashRouter as Router, Routes, Route, Navigate, Link, useLocation, useNavigate } from 'react-router-dom';
+import { DataProtectionService } from './services/dataProtectionService';
 import { MODULES } from './modules';
 import ModulePlaceholder from './components/ModulePlaceholder';
 import Home from './pages/Home';
@@ -37,6 +38,9 @@ const NotificationsModule = lazy(() => import('./pages/NotificationsModule'));
 const CatalogModule = lazy(() => import('./pages/CatalogModule'));
 const PdvTotemModule = lazy(() => import('./pages/PdvTotemModule'));
 const PdvCustomerDisplay = lazy(() => import('./pages/PdvCustomerDisplay'));
+const EmProducaoModule = lazy(() => import('./pages/EmProducaoModule'));
+const EmProducaoTv = lazy(() => import('./pages/EmProducaoTv'));
+const OperatorsModule = lazy(() => import('./pages/OperatorsModule'));
 import { cn } from './lib/utils';
 import { shallow } from 'zustand/shallow';
 import SettingsDrawer from './components/SettingsDrawer';
@@ -89,6 +93,8 @@ const ModuleComponentMap: Record<string, React.ComponentType<any>> = {
   catalogo: React.memo(PdvTotemModule),
   rede: React.memo(NetworkSettings),
   notificacoes: React.memo(NotificationsModule),
+  "em-producao": React.memo(EmProducaoModule),
+  operadores: React.memo(OperatorsModule),
 };
 
 const HOT_SCREENS_METADATA = [
@@ -150,6 +156,8 @@ function AppLayout() {
 
   const [pendingPayments, setPendingPayments] = React.useState<any[]>([]);
   const [globalCashReceived, setGlobalCashReceived] = React.useState('');
+  const [selectedPaymentForModal, setSelectedPaymentForModal] = React.useState<any | null>(null);
+  const [processedPaymentIds, setProcessedPaymentIds] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     const handleStatus = (e: Event) => {
@@ -182,9 +190,27 @@ function AppLayout() {
           return [...prev, enriched];
         });
       } else if (type === 'totem-pix-cancelled' || type === 'totem-payment-cancelled' || type === 'totem-payment-refused' || type === 'totem-pix-refused') {
-        setPendingPayments(prev => prev.filter(p => p.id !== payload?.id && p.terminalId !== payload?.terminalId));
+        setPendingPayments(prev => {
+          const next = prev.filter(p => p.id !== payload?.id && p.terminalId !== payload?.terminalId);
+          return next;
+        });
+        setSelectedPaymentForModal(prev => {
+          if (prev && (prev.id === payload?.id || prev.terminalId === payload?.terminalId)) {
+            return null;
+          }
+          return prev;
+        });
       } else if (type === 'totem-payment-approved' || type === 'totem-pix-approved') {
-        setPendingPayments(prev => prev.filter(p => p.id !== payload?.id && p.terminalId !== payload?.terminalId));
+        setPendingPayments(prev => {
+          const next = prev.filter(p => p.id !== payload?.id && p.terminalId !== payload?.terminalId);
+          return next;
+        });
+        setSelectedPaymentForModal(prev => {
+          if (prev && (prev.id === payload?.id || prev.terminalId === payload?.terminalId)) {
+            return null;
+          }
+          return prev;
+        });
       }
     };
     return () => {
@@ -193,6 +219,10 @@ function AppLayout() {
   }, []);
 
   const handleApproveGlobalPayment = (req: any, amountReceived?: number, change?: number) => {
+    if (!req) return;
+    if (processedPaymentIds.includes(req.id)) return;
+    setProcessedPaymentIds(prev => [...prev, req.id]);
+
     try {
       const salePayloadCopy = { ...req.salePayload };
       if (req.paymentType === 'money' && amountReceived !== undefined) {
@@ -219,16 +249,23 @@ function AppLayout() {
         });
         try { ch.close(); } catch (e) {}
         setPendingPayments(prev => prev.filter(p => p.id !== req.id));
+        setSelectedPaymentForModal(null);
         setGlobalCashReceived('');
       } else {
         alert('Erro ao registrar a venda no ERP.');
+        setProcessedPaymentIds(prev => prev.filter(id => id !== req.id));
       }
     } catch (err: any) {
       alert('Erro ao aprovar: ' + (err?.message || err));
+      setProcessedPaymentIds(prev => prev.filter(id => id !== req.id));
     }
   };
 
   const handleRefuseGlobalPayment = (req: any) => {
+    if (!req) return;
+    if (processedPaymentIds.includes(req.id)) return;
+    setProcessedPaymentIds(prev => [...prev, req.id]);
+
     const ch = new BroadcastChannel('pdv-totem-channel');
     ch.postMessage({
       type: 'totem-payment-refused',
@@ -240,6 +277,7 @@ function AppLayout() {
     });
     try { ch.close(); } catch (e) {}
     setPendingPayments(prev => prev.filter(p => p.id !== req.id));
+    setSelectedPaymentForModal(null);
     setGlobalCashReceived('');
   };
   const isSettingsOpen = useStore((state) => state.isSettingsOpen);
@@ -825,94 +863,91 @@ function AppLayout() {
 
   // Advanced Data Protection & Persistence
   React.useEffect(() => {
-    let intervalId: any = null;
-    let autoSaveTimeoutId: any = null;
     let isApplied = true;
 
     if (isAuthenticated) {
-      // 1. Reinforce persistence
-      import("./services/dataProtectionService").then(
-        ({ DataProtectionService }) => {
+      // 1. Reinforce persistence and initialize services
+      import("./services/dataProtectionService").then(({ DataProtectionService }) => {
+        if (!isApplied) return;
+        DataProtectionService.reinforcePersistence();
+
+        // Initialize Google Drive Service
+        import("./services/googleDriveService").then(({ GoogleDriveService }) => {
           if (!isApplied) return;
-          DataProtectionService.reinforcePersistence();
+          GoogleDriveService.initialize();
+        });
 
-          // Initialize Google Drive Service
-          import("./services/googleDriveService").then(({ GoogleDriveService }) => {
-            if (!isApplied) return;
-            GoogleDriveService.initialize();
+        // Start Central Snapshot/Backup Scheduler
+        import("./services/snapshotScheduler").then(({ SnapshotScheduler }) => {
+          if (!isApplied) return;
+          SnapshotScheduler.start();
+        });
+      });
+
+      // 2. Electron-specific app close / quit snapshot interceptor
+      const hasElectron = typeof window !== 'undefined' && (window as any).electron;
+      if (hasElectron) {
+        console.log('[App] Registrando interceptador nativo de encerramento do Electron...');
+        const removeCloseListener = (window as any).electron.onAppCloseTriggered(async () => {
+          console.info('[App] Mensagem de encerramento recebida do Electron! Executando snapshot de fechamento...');
+          try {
+            const state = useStore.getState();
+            // Snapshot ao fechar o ERP se estiver dirty
+            if (state.isDirty || state.isDriveDirty) {
+              console.log('[App] Sistema detectou alterações não salvas no encerramento. Gravando backup rápido...');
+              const rawString = await state.exportData();
+              const parsed = JSON.parse(rawString);
+
+              // 2.1 Backup Local
+              await DataProtectionService.createSnapshot(
+                parsed.data,
+                parsed.version || '1.2.1',
+                'auto',
+                'Backup automático de rotina (Fechamento/Encerramento do ERP)'
+              );
+
+              // 2.2 Upload para Google Drive se ativo
+              if (state.googleDriveBackupEnabled) {
+                const encrypted = await DataProtectionService.exportEncryptedFile(parsed.data, parsed.version || '1.2.1');
+                const nowStr = new Date().toISOString().slice(0, 19).replace(/T/g, '-').replace(/:/g, '-');
+                const filename = `backup-exit-erp-${nowStr}.json`;
+
+                const cloudPromise = import("./services/googleDriveService").then(({ GoogleDriveService }) => {
+                  return GoogleDriveService.uploadBackupToCloud(encrypted, filename, 'auto');
+                });
+
+                // Limite de 5 segundos para o upload do backup ao fechar no Cloud Drive
+                await Promise.race([
+                  cloudPromise,
+                  new Promise(res => setTimeout(res, 5000))
+                ]);
+              }
+            } else {
+              console.log('[App] Nada dirty no encerramento. Saindo sem backup adicional.');
+            }
+          } catch (exitErr) {
+            console.error('[App] Erro crítico ao criar snapshot de encerramento:', exitErr);
+          } finally {
+            console.log('[App] Sinalizando para o processo principal que o fechamento forçado está autorizado.');
+            (window as any).electron.forceQuit();
+          }
+        });
+
+        return () => {
+          isApplied = false;
+          removeCloseListener();
+          import("./services/snapshotScheduler").then(({ SnapshotScheduler }) => {
+            SnapshotScheduler.stop();
           });
-
-          // 2. Defer initial snapshot by 15 seconds to prevent startup rendering/mounting lag
-          autoSaveTimeoutId = setTimeout(async () => {
-            if (!isApplied) return;
-            try {
-              const state = useStore.getState();
-              const exportDataStr = await state.exportData();
-              const exportData = JSON.parse(exportDataStr);
-              await DataProtectionService.createSnapshot(
-                exportData.data,
-                "1.2.0",
-                "auto",
-                "Snapshot automático ao iniciar sessão"
-              );
-
-              // Silent cloud backup if enabled
-              if (state.googleDriveBackupEnabled) {
-                const encrypted = await DataProtectionService.exportEncryptedFile(exportData.data, "1.2.0");
-                import("./services/googleDriveService").then(({ GoogleDriveService }) => {
-                  if (!isApplied) return;
-                  GoogleDriveService.uploadBackupToCloud(
-                    encrypted,
-                    `snapshot-sessao-${new Date().toISOString().split('T')[0]}-${new Date().getHours()}-${new Date().getMinutes()}.json`
-                  );
-                });
-              }
-            } catch (err) {
-              console.error('[App] Defer initial backup error:', err);
-            }
-          }, 15000); // 15 seconds delay to allow smooth system boot
-
-          // 3. Periodic snapshots (every 15 minutes)
-          intervalId = setInterval(async () => {
-            if (!isApplied) return;
-            try {
-              const state = useStore.getState();
-              const exportDataStr = await state.exportData();
-              const exportData = JSON.parse(exportDataStr);
-              await DataProtectionService.createSnapshot(
-                exportData.data,
-                "1.2.0",
-                "auto",
-                "Snapshot periódico automático"
-              );
-
-              // Silent cloud backup if enabled
-              if (state.googleDriveBackupEnabled) {
-                const encrypted = await DataProtectionService.exportEncryptedFile(exportData.data, "1.2.0");
-                import("./services/googleDriveService").then(({ GoogleDriveService }) => {
-                  if (!isApplied) return;
-                  GoogleDriveService.uploadBackupToCloud(
-                    encrypted,
-                    `snapshot-periodico-${new Date().toISOString().split('T')[0]}-${new Date().getHours()}-${new Date().getMinutes()}.json`
-                  );
-                });
-              }
-            } catch (err) {
-              console.error('[App] Periodic auto-backup error:', err);
-            }
-          }, 15 * 60 * 1000);
-        }
-      );
+        };
+      }
     }
 
     return () => {
       isApplied = false;
-      if (autoSaveTimeoutId) {
-        clearTimeout(autoSaveTimeoutId);
-      }
-      if (intervalId) {
-        clearInterval(intervalId);
-      }
+      import("./services/snapshotScheduler").then(({ SnapshotScheduler }) => {
+        SnapshotScheduler.stop();
+      });
     };
   }, [isAuthenticated]);
 
@@ -1103,12 +1138,63 @@ function AppLayout() {
           </motion.div>
         )}
 
-        {pendingPayments.length > 0 && (() => {
-          const activeReq = pendingPayments[0];
+        {/* Floating Discrete Totem Notifications */}
+        {pendingPayments.length > 0 && (
+          <div id="totem-global-notifications" className="fixed bottom-6 right-6 z-[9999] flex flex-col gap-3 max-w-sm w-full pointer-events-none">
+            <AnimatePresence>
+              {pendingPayments.map((p) => (
+                <motion.div
+                  key={p.id}
+                  initial={{ opacity: 0, y: 50, scale: 0.9 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, x: 100, scale: 0.9 }}
+                  className="pointer-events-auto bg-[#121212]/95 border border-amber-500/30 rounded-2xl p-4 shadow-2xl flex flex-col gap-2 backdrop-blur-md relative overflow-hidden"
+                >
+                  <div className="absolute top-0 left-0 w-1.5 h-full bg-amber-550" />
+                  <div className="flex justify-between items-center pl-2">
+                    <span className="text-[9px] font-black uppercase text-amber-500 tracking-wider">
+                      Terminal #{p.terminalId || 1}
+                    </span>
+                    <span className="text-[10px] font-mono font-extrabold text-white">
+                      R$ {p.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                  <div className="pl-2 space-y-0.5">
+                    <div className="text-[10px] text-zinc-450 uppercase truncate">
+                      Cliente: <strong className="text-zinc-200 font-bold">{p.clientName || 'Consumidor Final'}</strong>
+                    </div>
+                    <div className="text-[10px] text-zinc-450 uppercase">
+                      Forma: <strong className="text-amber-400 font-extrabold">{p.chosenMethod?.name || p.paymentType?.toUpperCase()}</strong>
+                    </div>
+                  </div>
+                  <div className="pl-2 pt-1 flex gap-2">
+                    <button
+                      onClick={() => setSelectedPaymentForModal(p)}
+                      className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-black text-[9px] font-black uppercase rounded-lg transition-all tracking-wider font-sans cursor-pointer flex-1 text-center font-bold"
+                    >
+                      Ver pagamento
+                    </button>
+                    <button
+                      onClick={() => handleRefuseGlobalPayment(p)}
+                      className="px-3 py-1.5 bg-red-550/10 hover:bg-red-550/20 text-red-400 text-[9px] font-black uppercase rounded-lg transition-all tracking-wider font-sans cursor-pointer text-center font-bold"
+                    >
+                      Recusar
+                    </button>
+                  </div>
+                </motion.div>
+              ))}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Detailed confirmation modal shown on click */}
+        {selectedPaymentForModal && (() => {
+          const activeReq = selectedPaymentForModal;
           const totalVal = activeReq.total || 0;
           const isMoney = activeReq.paymentType === 'money';
           const receivedVal = parseFloat(globalCashReceived) || 0;
           const changeVal = receivedVal >= totalVal ? receivedVal - totalVal : 0;
+          const isProcessing = processedPaymentIds.includes(activeReq.id);
 
           return (
             <motion.div
@@ -1123,6 +1209,17 @@ function AppLayout() {
                 exit={{ scale: 0.95, y: 15 }}
                 className="w-full max-w-lg bg-[#0e0e0e] border border-amber-500/20 rounded-[2.5rem] p-8 shadow-2xl relative space-y-6"
               >
+                {/* Close Button */}
+                <button
+                  onClick={() => {
+                    setSelectedPaymentForModal(null);
+                    setGlobalCashReceived('');
+                  }}
+                  className="absolute top-6 right-6 text-zinc-400 hover:text-white text-xs border border-white/5 bg-white/5 hover:bg-white/10 rounded-full w-8 h-8 flex items-center justify-center cursor-pointer"
+                >
+                  ✕
+                </button>
+
                 <div className="flex items-center justify-between border-b border-white/5 pb-4">
                   <div className="flex items-center gap-2.5">
                     <div className="w-2 h-2 rounded-full bg-amber-500 animate-ping" />
@@ -1194,9 +1291,10 @@ function AppLayout() {
                 <div className="flex flex-col sm:flex-row gap-3 pt-2 border-t border-white/5">
                   <button
                     onClick={() => handleRefuseGlobalPayment(activeReq)}
-                    className="flex-1 py-3.5 bg-red-550/10 hover:bg-red-550/18 border border-red-500/10 hover:border-red-550/20 text-red-400 hover:text-red-300 rounded-2xl text-[9px] uppercase font-black tracking-widest transition-all cursor-pointer"
+                    disabled={isProcessing}
+                    className="flex-1 py-3.5 bg-red-550/10 hover:bg-red-550/18 border border-red-500/10 hover:border-red-550/20 text-red-400 hover:text-red-300 rounded-2xl text-[9px] uppercase font-black tracking-widest transition-all cursor-pointer disabled:opacity-50 font-bold"
                   >
-                    Recusar / Cancelar
+                    Cancelar pagamento
                   </button>
 
                   <button
@@ -1208,14 +1306,14 @@ function AppLayout() {
                         handleApproveGlobalPayment(activeReq);
                       }
                     }}
-                    disabled={isMoney && receivedVal < totalVal}
+                    disabled={isProcessing || (isMoney && receivedVal < totalVal)}
                     className={`flex-1 py-3.5 rounded-2xl text-[9px] uppercase font-black tracking-widest transition-all shadow-lg flex items-center justify-center gap-2 ${
-                      isMoney && receivedVal < totalVal
+                      (isMoney && receivedVal < totalVal) || isProcessing
                         ? 'bg-zinc-800 text-zinc-600 border border-zinc-700/55 cursor-not-allowed opacity-60'
-                        : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/15 cursor-pointer active:scale-95'
+                        : 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/15 cursor-pointer active:scale-95 font-bold'
                     }`}
                   >
-                    Confirmar e Faturar
+                    {isProcessing ? 'Processando...' : 'Confirmar pagamento'}
                   </button>
                 </div>
               </motion.div>
@@ -1850,7 +1948,12 @@ function Main() {
     );
   }
 
-  if (hasHydrated && sqliteStatus === 'error') {
+  const isSecondaryPath = location.pathname.includes('kiosk') || 
+                          window.location.hash.includes('kiosk') || 
+                          location.pathname.includes('customer-display') || 
+                          window.location.hash.includes('customer-display');
+
+  if (hasHydrated && sqliteStatus === 'error' && !isSecondaryPath) {
     return (
       <div className="min-h-[100dvh] md:min-h-screen bg-[#0A0A0A] flex items-center justify-center p-4 relative select-none">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,_rgba(239,68,68,0.06),_transparent_45%)] pointer-events-none" />
@@ -1999,6 +2102,20 @@ function Main() {
           <Routes>
             <Route path="/pdv/customer-display" element={<PdvCustomerDisplay />} />
             <Route path="*" element={<Navigate to="/pdv/customer-display" replace />} />
+          </Routes>
+        </Suspense>
+      </div>
+    );
+  }
+
+  const isEmProducaoTv = location.pathname === '/em-producao-tv' || window.location.hash.includes('/em-producao-tv') || window.location.pathname.includes('/em-producao-tv');
+  if (isEmProducaoTv) {
+    return (
+      <div className="flex flex-col h-screen bg-[#070707] text-slate-300 overflow-hidden font-sans relative w-full border-none">
+        <Suspense fallback={<LoadingModule />}>
+          <Routes>
+            <Route path="/em-producao-tv" element={<EmProducaoTv />} />
+            <Route path="*" element={<Navigate to="/em-producao-tv" replace />} />
           </Routes>
         </Suspense>
       </div>

@@ -25,7 +25,9 @@ import {
   Settings,
   TrendingUp,
   Radio,
-  Tablet
+  Tablet,
+  ChefHat,
+  UserCog
 } from 'lucide-react';
 import { LucideIcon } from 'lucide-react';
 
@@ -41,6 +43,7 @@ export const MODULES: ModuleConfig[] = [
   // Prioritários
   { id: 'abrir-caixa', name: 'Abrir/Fechar Caixa', icon: LockKeyholeOpen, path: '/abrir-caixa', category: 'Financeiro' },
   { id: 'pdv', name: 'Vender', icon: ShoppingCart, path: '/pdv', category: 'Operacional' },
+  { id: 'em-producao', name: 'Em Produção', icon: ChefHat, path: '/em-producao', category: 'Operacional' },
   { id: 'gestao-pedidos', name: 'Gestão de Pedidos', icon: ClipboardList, path: '/gestao-pedidos', category: 'Logística' },
   { id: 'separacao', name: 'Separação', icon: Box, path: '/separacao', category: 'Logística' },
   { id: 'entrega', name: 'Entrega', icon: Truck, path: '/entrega', category: 'Logística' },
@@ -56,6 +59,7 @@ export const MODULES: ModuleConfig[] = [
   { id: 'central-operacional', name: 'Central Operacional', icon: Radio, path: '/central-operacional', category: 'Operacional' },
   { id: 'pagamentos', name: 'Pagamentos', icon: CreditCard, path: '/pagamentos', category: 'Financeiro' },
   { id: 'auditoria', name: 'Auditoria', icon: ShieldCheck, path: '/auditoria', category: 'Inteligência' },
+  { id: 'operadores', name: 'Operadores', icon: UserCog, path: '/operadores', category: 'Inteligência' },
   { id: 'lojistas', name: 'Lojistas', icon: Store, path: '/lojistas', category: 'Gestão' },
   { id: 'ia', name: 'IA Operacional', icon: Sparkles, path: '/ia', category: 'Inteligência' },
   { id: 'pdv-totem', name: 'PDV Totem', icon: Tablet, path: '/pdv-totem', category: 'Operacional' },

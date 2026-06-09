@@ -21,6 +21,7 @@ import {
 import { useStore } from '../store';
 import { BackupService, CorporateBackupSettings as SettingsType, StorageHealthReport } from '../services/backupService';
 import { DataProtectionService, DataBackup, BackupHistory } from '../services/dataProtectionService';
+import { SnapshotScheduler } from '../services/snapshotScheduler';
 import { cn } from '../lib/utils';
 import { format } from 'date-fns';
 
@@ -135,31 +136,10 @@ export default function CorporateBackupSettings({ isEmbedded = false }: Corporat
     setRestoreProgress('Exportando base de dados...');
     
     try {
-      // Export current state
-      const rawString = await store.exportData();
-      const parsed = JSON.parse(rawString);
-      
-      const operatorName = currentUser?.fullName || 'Operador ADM';
       const desc = manualDescription.trim() || 'Snapshot manual corporativo';
+      await SnapshotScheduler.triggerManualBackup(desc);
 
-      await DataProtectionService.createSnapshot(
-        parsed.data,
-        parsed.version || '1.2.1',
-        'manual',
-        `${desc} (Criado por: ${operatorName})`
-      );
-
-      // Log audit
-      store.addActivity(`Snapshot manual criado: ${desc}`, 'alert', 'Sistema', operatorName);
-      store.logAction({
-        module: 'Sistema',
-        actionType: 'other',
-        description: `Snapshot de backup manual criado: ${desc}`,
-        status: 'sucesso',
-        riskLevel: 'baixo'
-      });
-
-      setSuccessMessage('Snapshot operacional criado com sucesso no armazenamento local.');
+      setSuccessMessage('Snapshot manual corporativo executado com sucesso e sincronizado no Google Drive se ativo.');
       setManualDescription('');
       setTimeout(() => setSuccessMessage(null), 4000);
     } catch (err: any) {

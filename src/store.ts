@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { safeIdbGet as idbGet, safeIdbSet as idbSet, safeIdbDel as idbDel } from './lib/idbFallback';
+import { DataProtectionService } from './services/dataProtectionService';
 import { roundMoney, safeAdd, safeSubtract, safeMultiply, safeDivide, safePercent } from './utils/money';
 import { getOrCreateDeviceId } from './services/networkService';
 import { environmentService } from './services/environmentService';
@@ -575,6 +576,17 @@ export interface ProductionRun {
   updatedBy?: string;
 }
 
+export interface ProductVariation {
+  id: string;
+  sku: string;
+  name: string;
+  stock: number;
+  price?: number;
+  wholesalePrice?: number;
+  costPrice?: number;
+  image?: string;
+}
+
 export interface Product {
   id: string;
   name: string;
@@ -614,6 +626,12 @@ export interface Product {
   catalogPriceOverride?: number;
   catalogPriceShow?: boolean;
   totemHabilitado?: boolean;
+  variations?: ProductVariation[];
+  file3d?: {
+    name: string;
+    type: string;
+    data: string;
+  };
 }
 
 export interface ConsignmentItem {
@@ -679,6 +697,9 @@ export interface CartItem extends Product {
   totalCostAtSale?: number;
   unitPriceAtSale?: number;
   totalPriceAtSale?: number;
+  selectedVariationId?: string;
+  selectedVariationName?: string;
+  selectedVariationSku?: string;
 }
 
 export interface SalePayment {
@@ -709,7 +730,11 @@ export interface Sale {
   pickTimestamp?: number;
   pickStartTime?: number;
   pickDuration?: number; // in seconds
-  status: 'aguardando_separacao' | 'enviado_separacao' | 'em_separacao' | 'separado' | 'separado_com_faltantes' | 'aguardando_embalagem' | 'embalando' | 'em_rota' | 'entregue' | 'problema' | 'atrasado' | 'retirado' | 'cancelado' | 'finalizado';
+  status: 'em_producao' | 'aguardando_separacao' | 'enviado_separacao' | 'em_separacao' | 'separado' | 'separado_com_faltantes' | 'aguardando_embalagem' | 'embalando' | 'em_rota' | 'entregue' | 'problema' | 'atrasado' | 'retirado' | 'cancelado' | 'finalizado';
+  productionStatus?: 'em_fila' | 'produzindo' | 'pausado' | 'finalizado';
+  productionNotes?: string;
+  productionPriority?: 'baixa' | 'media' | 'alta';
+  origin?: 'PDV' | 'Totem';
   totalRequestedQuantity?: number;
   totalPickedQuantity?: number;
   totalMissingQuantity?: number;
@@ -1556,6 +1581,16 @@ export interface DocumentPrintConfig {
   watermark?: string;
   mediaType?: string;
   printQuality?: string;
+  
+  // Advanced Windows/Driver Integration Fields
+  printPipeline?: 'electron' | 'windows_advanced';
+  copies?: number;
+  dpi?: string;
+  paperSource?: string;
+  colorMode?: 'color' | 'mono' | 'grayscale';
+  duplexMode?: 'simplex' | 'duplex' | 'duplex_short' | 'duplex_long';
+  advancedModeEnabled?: boolean;
+  paperSize?: string;
 }
 
 export interface PrintJob {
@@ -1577,6 +1612,14 @@ export interface PrintJob {
   payload?: any;
   mediaType?: string;
   printQuality?: string;
+  // Advanced Driver Configuration Parameters
+  printPipeline?: 'electron' | 'windows_advanced';
+  copies?: number;
+  dpi?: string;
+  paperSource?: string;
+  colorMode?: 'color' | 'mono' | 'grayscale';
+  duplexMode?: 'simplex' | 'duplex' | 'duplex_short' | 'duplex_long';
+  advancedModeEnabled?: boolean;
 }
 
 interface AppState {
@@ -1612,6 +1655,10 @@ interface AppState {
   setFirstAccessSetupComplete: (complete: boolean) => void;
   hasHydrated: boolean;
   setHasHydrated: (hydrated: boolean) => void;
+  isDirty: boolean;
+  setIsDirty: (dirty: boolean) => void;
+  isDriveDirty: boolean;
+  setIsDriveDirty: (dirty: boolean) => void;
   databaseStatus: 'initializing' | 'ready' | 'degraded' | 'error';
   setDatabaseStatus: (status: 'initializing' | 'ready' | 'degraded' | 'error') => void;
   sqliteStatus: 'checking' | 'ready' | 'error' | 'web';
@@ -1772,7 +1819,7 @@ interface AppState {
   runAutomations: (trigger: Automation['trigger'], context?: any) => void;
 
   // Inventory
-  updateStock: (productId: string, quantity: number) => void;
+  updateStock: (productId: string, quantity: number, variationId?: string) => void;
 
   // Pre-Orders
   addPreOrder: (preOrder: Omit<PreOrder, 'id' | 'orderCode' | 'createdAt' | 'status'>) => void;
@@ -2000,6 +2047,8 @@ const INITIAL_APP_DATA = {
   lastBackupAt: null as number | null,
   googleDriveBackupEnabled: false,
   googleDriveLastSyncAt: null as number | null,
+  isDirty: false as boolean,
+  isDriveDirty: false as boolean,
   masterPassword: '',
   recoveryMasterPassword: '',
   masterAuthorizations: [] as MasterAuthorization[],
@@ -2018,7 +2067,7 @@ const INITIAL_APP_DATA = {
       type: 'pdf_manual' as const,
       origin: 'manual' as const,
       status: 'ativa' as const,
-      compatibilities: ['thermal_receipt', 'order_ticket', 'customer_experience', 'labels', 'bulk_labels'],
+      compatibilities: ['thermal_receipt', 'order_ticket', 'customer_experience', 'labels', 'bulk_labels', 'cracha'],
       createdAt: 1774320000000,
       updatedAt: 1774320000000
     }
@@ -2202,6 +2251,29 @@ export const useStore = create<AppState>()(
                 nextState[key] = enrichedArr;
               }
             }
+          }
+
+          // Operational dirty state detection for automated backups
+          const dirtyTriggerKeys = [
+            'products', 'clients', 'sales', 'preOrders', 'categories', 'subcategories',
+            'materials', 'productions', 'productionRuns', 'returns', 'consignmentRemittances',
+            'financialTransactions', 'users', 'userRoles', 'badges', 'masterAuthorizations',
+            'masterBadges', 'masterPassword', 'deliveryMethods', 'company', 'receiptConfig',
+            'orderTicketConfig', 'labelConfig', 'labelBatchConfig', 'badgeConfig',
+            'customerExperienceConfig', 'catalogConfig', 'terminals', 'printers', 'nfcTags',
+            'machines', 'productionSimulations', 'automations', 'retailers'
+          ];
+          
+          const hasOperationalChanges = dirtyTriggerKeys.some(key => {
+            if (nextState && nextState[key] !== undefined) {
+              return JSON.stringify(nextState[key]) !== JSON.stringify((get() as any)[key]);
+            }
+            return false;
+          });
+
+          if (hasOperationalChanges) {
+            nextState.isDirty = true;
+            nextState.isDriveDirty = true;
           }
         }
         rawSet(nextState as any, replace);
@@ -2543,6 +2615,7 @@ export const useStore = create<AppState>()(
             { module: 'Sincronização Local', actions: { acessar: true, visualizar: true, cadastrar: true, editar: true, excluir: true, cancelar: true, imprimir: true, gerarPDF: true, verValores: true, alterarStatus: true, configurar: true } },
             { module: 'Ajustes', actions: { acessar: true, visualizar: true, cadastrar: true, editar: true, excluir: true, cancelar: true, imprimir: true, gerarPDF: true, verValores: true, alterarStatus: true, configurar: true } },
             { module: 'Usuários e Funções', actions: { acessar: true, visualizar: true, cadastrar: true, editar: true, excluir: true, cancelar: true, imprimir: true, gerarPDF: true, verValores: true, alterarStatus: true, configurar: true } },
+            { module: 'Em Produção', actions: { acessar: true, visualizar: true, cadastrar: true, editar: true, excluir: true, cancelar: true, imprimir: true, gerarPDF: true, verValores: true, alterarStatus: true, configurar: true } },
             { module: 'Crachá', actions: { acessar: true, visualizar: true, cadastrar: true, editar: true, excluir: true, cancelar: true, imprimir: true, gerarPDF: true, verValores: true, alterarStatus: true, configurar: true } }
           ]
         },
@@ -2734,6 +2807,8 @@ export const useStore = create<AppState>()(
   setPendingWelcome: (pending) => set({ pendingWelcome: pending }),
   setFirstAccessSetupComplete: (complete) => set({ firstAccessSetupComplete: complete }),
   setHasHydrated: (hydrated) => set({ hasHydrated: hydrated }),
+  setIsDirty: (dirty) => set({ isDirty: dirty }),
+  setIsDriveDirty: (dirty) => set({ isDriveDirty: dirty }),
   setDatabaseStatus: (status) => {
     console.log(`[STORAGE] Database status modified to: ${status}`);
     set({ databaseStatus: status });
@@ -3226,16 +3301,19 @@ export const useStore = create<AppState>()(
     const { nextOrderNumber } = get();
     const orderNumStr = nextOrderNumber.toString().padStart(4, '0');
 
+    const initialStatus = (saleData as any).status || 'aguardando_separacao';
     const initialEvents: TimelineEvent[] = [
       {
         id: generateUUID(),
         type: 'order',
         timestamp: Date.now(),
         user: saleData.sellerName || 'Sistema',
-        description: `Pedido criado pelo vendedor ${saleData.sellerName || 'Sistema'}`,
-        status: 'aguardando_separacao',
+        description: initialStatus === 'em_producao'
+          ? `Pedido encaminhado diretamente para produção`
+          : `Pedido criado pelo vendedor ${saleData.sellerName || 'Sistema'}`,
+        status: initialStatus,
         icon: 'Archive',
-        color: 'text-amber-500'
+        color: initialStatus === 'em_producao' ? 'text-amber-500 font-bold' : 'text-amber-500'
       },
       {
         id: generateUUID(),
@@ -3309,7 +3387,7 @@ export const useStore = create<AppState>()(
       clientPhone: client ? (client.phone || client.whatsapp || '') : '',
       orderNumber: orderNumStr,
       timestamp: Date.now(),
-      status: 'aguardando_separacao',
+      status: (saleData as any).status || 'aguardando_separacao',
       items: frozenItems,
       originalItems: JSON.parse(JSON.stringify(frozenItems)),
       originalSubtotal: saleData.subtotal,
@@ -3450,6 +3528,9 @@ export const useStore = create<AppState>()(
   },
 
   updateSaleStatus: (saleId, status, userName = 'Administrator', customDescription, bypassValidationConfirm = false) => {
+    const isDesktop = typeof window !== 'undefined' && !!(window as any).electron;
+    const electronAPI = isDesktop ? (window as any).electron : null;
+
     const { sales, financialTransactions, updateStock } = get();
     const sale = sales.find(s => s.id === saleId);
     if (!sale) return;
@@ -3492,7 +3573,7 @@ export const useStore = create<AppState>()(
       sale.items.forEach(item => {
         const pickedQty = item.pickedQuantity || 0;
         if (pickedQty > 0) {
-          updateStock(item.id, pickedQty); // Add back the stock that was subtracted
+          updateStock(item.id, pickedQty, item.selectedVariationId); // Add back the stock that was subtracted
         }
       });
       
@@ -3695,9 +3776,23 @@ export const useStore = create<AppState>()(
         });
       }
     }
+
+    if (isDesktop && electronAPI && electronAPI.db) {
+      electronAPI.db.insertSale(saleToUpdate).catch((err: any) => {
+        console.error('[SQLite] Falha ao persistir venda:', err);
+      });
+      if (status === 'cancelado' && previousStatus !== 'cancelado' && cashierToUpdate) {
+        electronAPI.db.insertCashierSession(cashierToUpdate).catch((err: any) => {
+          console.error('[SQLite] Falha ao persistir sessao de caixa:', err);
+        });
+      }
+    }
   },
   
   updateSale: (saleId, data) => {
+    const isDesktop = typeof window !== 'undefined' && !!(window as any).electron;
+    const electronAPI = isDesktop ? (window as any).electron : null;
+
     set((state) => ({
       sales: state.sales.map(s => {
         if (s.id === saleId) {
@@ -3763,6 +3858,13 @@ export const useStore = create<AppState>()(
         return s;
       })
     }));
+
+    const updatedSale = get().sales.find(s => s.id === saleId);
+    if (updatedSale && isDesktop && electronAPI && electronAPI.db) {
+      electronAPI.db.insertSale(updatedSale).catch((err: any) => {
+        console.error('[SQLite] Falha ao persistir venda:', err);
+      });
+    }
   },
 
   addSaleTimelineEvent: (saleId, event) => {
@@ -3849,6 +3951,9 @@ export const useStore = create<AppState>()(
   },
 
   startSeparation: (saleId, pickerId, pickerName) => {
+    const isDesktop = typeof window !== 'undefined' && !!(window as any).electron;
+    const electronAPI = isDesktop ? (window as any).electron : null;
+
     set((state) => ({
       sales: state.sales.map(s => {
         if (s.id === saleId) {
@@ -3890,6 +3995,12 @@ export const useStore = create<AppState>()(
         entityId: saleId,
         newValue: 'Status de separação iniciado'
       });
+
+      if (isDesktop && electronAPI && electronAPI.db) {
+        electronAPI.db.insertSale(sale).catch((err: any) => {
+          console.error('[SQLite] Falha ao persistir venda:', err);
+        });
+      }
     }
   },
 
@@ -3908,7 +4019,7 @@ export const useStore = create<AppState>()(
         const product = products.find(p => p.id === item.id);
         const prevStock = product ? product.stock : 0;
 
-        updateStock(item.id, -pickedQty);
+        updateStock(item.id, -pickedQty, item.selectedVariationId);
         
         get().logAction({
           module: 'Estoque',
@@ -4441,7 +4552,7 @@ export const useStore = create<AppState>()(
     get().addActivity(`Meio de pagamento atualizado: ${id}`, 'cashier', 'Pagamentos', userName, id);
   },
 
-  updateStock: (productId, quantity) => {
+  updateStock: (productId, quantity, variationId) => {
     set((state) => {
       const newProducts = state.products.map(p => {
         if (p.id === productId) {
@@ -4457,7 +4568,23 @@ export const useStore = create<AppState>()(
             user.roleId?.includes('gerente') ||
             user.roleId?.includes('supervisor')
           ));
-          const validation = operationalValidationService.validateStockChange(p, quantity, isAdminUser);
+
+          let activeStock = p.stock;
+          let activeName = p.name;
+          let activeMinStock = p.minStock;
+
+          let updatedVariations = p.variations;
+          if (variationId && p.variations && p.variations.length > 0) {
+            const variation = p.variations.find(v => v.id === variationId);
+            if (variation) {
+              activeStock = variation.stock;
+              activeName = `${p.name} (${variation.name})`;
+              activeMinStock = 0; // variation-level validation fallback
+            }
+          }
+
+          const validationObj = { ...p, stock: activeStock, name: activeName, minStock: activeMinStock };
+          const validation = operationalValidationService.validateStockChange(validationObj, quantity, isAdminUser);
           
           if (!validation.valid) {
             alert(`Bloqueio de Erro Humano:\n${validation.reason}`);
@@ -4470,11 +4597,23 @@ export const useStore = create<AppState>()(
             alert(validation.warning);
           }
 
-          const newStock = p.stock + quantity;
+          let newStock = p.stock;
+          if (variationId && p.variations && p.variations.length > 0) {
+            updatedVariations = p.variations.map(v => {
+              if (v.id === variationId) {
+                return { ...v, stock: v.stock + quantity };
+              }
+              return v;
+            });
+            newStock = updatedVariations.reduce((sum, v2) => sum + v2.stock, 0);
+          } else {
+            newStock = p.stock + quantity;
+          }
+
           if (newStock < p.minStock) {
             get().runAutomations('estoque_baixo', p);
           }
-          const updatedProduct = { ...p, stock: newStock };
+          const updatedProduct = { ...p, stock: newStock, variations: updatedVariations };
 
           const isDesktop = typeof window !== 'undefined' && !!(window as any).electron;
           const electronAPI = isDesktop ? (window as any).electron : null;
@@ -7238,6 +7377,7 @@ export const useStore = create<AppState>()(
         'PDV': 'pdv',
         'Vendas': 'pdv',
         'Gestão de Pedidos': 'gestao-pedidos',
+        'Em Produção': 'em-producao',
         'Separação': 'separacao',
         'Entrega': 'entrega',
         'Estoque': 'estoque',
@@ -9173,6 +9313,15 @@ export const useStore = create<AppState>()(
 
     const mediaType = config?.mediaType || config?.selectedDriverMediaName || '';
     const printQuality = config?.printQuality || '';
+    
+    // Copy Advanced Windows Driver Integration Parameters
+    const printPipeline = config?.printPipeline || 'electron';
+    const copies = config?.copies || 1;
+    const dpi = config?.dpi || '';
+    const paperSource = config?.paperSource || '';
+    const colorMode = config?.colorMode || 'color';
+    const duplexMode = config?.duplexMode || 'simplex';
+    const advancedModeEnabled = config?.advancedModeEnabled || false;
 
     const id = job.id || `print-job-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
     const newJob: PrintJob = {
@@ -9188,6 +9337,13 @@ export const useStore = create<AppState>()(
       safeMode: resolvedSafeMode,
       mediaType,
       printQuality,
+      printPipeline,
+      copies,
+      dpi,
+      paperSource,
+      colorMode,
+      duplexMode,
+      advancedModeEnabled,
       createdAt: Date.now(),
       status: 'aguardando',
     } as any;
@@ -9261,7 +9417,16 @@ export const useStore = create<AppState>()(
         return { success: false, error: 'Arquivo de backup inválido ou corrompido.' };
       }
 
-      const backupData = importObj.data;
+      let backupData = importObj.data;
+      if (importObj.isEncrypted && typeof backupData === 'string') {
+        try {
+          backupData = await DataProtectionService.decryptIfNeeded(importObj);
+        } catch (decErr: any) {
+          return { success: false, error: decErr.message || 'Falha ao descriptografar dados do backup.' };
+        }
+      } else if (!importObj.isEncrypted) {
+        console.warn('Backup antigo sem criptografia detectado. Restaurando no modo compatibilidade.');
+      }
       
       // Basic validation of required fields to ensure it's a valid backup
       const requiredFields = ['products', 'clients', 'users', 'company'];
@@ -9621,8 +9786,21 @@ export const useStore = create<AppState>()(
     });
   },
 
-  resetData: (keepSettings = true) => {
+  resetData: async (keepSettings = true) => {
     const currentState = get();
+    try {
+      console.log('[Store] Executando snapshot preventivo de segurança pré-reset...');
+      const rawString = await currentState.exportData();
+      const parsed = JSON.parse(rawString);
+      await DataProtectionService.createSnapshot(
+        parsed.data,
+        parsed.version || '1.2.1',
+        'auto',
+        `Snapshot Preventivo Pré-Reset (${keepSettings ? 'Preservar Cores/Empresa/Setups' : 'Reset Completo/Geral'})`
+      );
+    } catch (err) {
+      console.warn('[Store] Falha ao gerar snapshot pré-reset de segurança:', err);
+    }
     
     if (keepSettings) {
       set({
@@ -9958,14 +10136,38 @@ export const useStore = create<AppState>()(
 
           const isDesktop = typeof window !== 'undefined' && (!!(window as any).electron || navigator.userAgent.toLowerCase().includes('electron'));
 
-          const getElectronAPIWithRetry = async (maxRetries = 20, delayMs = 50): Promise<any> => {
+          const getElectronAPIWithRetry = async (maxRetries = 100, delayMs = 100): Promise<any> => {
+            console.log(`[SQLite/Boot] Iniciando getElectronAPIWithRetry com maxRetries=${maxRetries}, delayMs=${delayMs}...`);
+            const isSecondaryWindow = typeof window !== 'undefined' && (
+              window.location.hash.includes('kiosk') || 
+              window.location.hash.includes('customer-display') || 
+              window.location.pathname.includes('kiosk') || 
+              window.location.pathname.includes('customer-display')
+            );
+            
             for (let i = 0; i < maxRetries; i++) {
-              if (typeof window !== 'undefined' && (window as any).electron && (window as any).electron.db) {
-                return (window as any).electron;
+              if (typeof window !== 'undefined') {
+                const win = window as any;
+                const hasElectron = !!win.electron;
+                const hasDb = !!(win.electron && win.electron.db);
+                if (hasDb) {
+                  console.info(`[SQLite/Boot] API de banco do Electron detectada com sucesso na tentativa ${i + 1}.`);
+                  return win.electron;
+                }
+                if (i % 10 === 0 || i === maxRetries - 1) {
+                  console.warn(`[SQLite/Boot] Tentativa ${i + 1}/${maxRetries} de carregar Electron API. Estado atual - window.electron: ${hasElectron}, window.electron.db: ${hasDb} (Janela Secundária: ${isSecondaryWindow})`);
+                }
               }
               await new Promise(resolve => setTimeout(resolve, delayMs));
             }
-            return (typeof window !== 'undefined' && (window as any).electron) || null;
+            if (typeof window !== 'undefined') {
+              const win = window as any;
+              const hasElectron = !!win.electron;
+              const hasDb = !!(win.electron && win.electron.db);
+              console.error(`[SQLite/Boot] Falha final ao carregar a API do banco do Electron após ${maxRetries} tentativas. Contexto final - window.electron: ${hasElectron}, window.electron.db: ${hasDb} (Janela Secundária: ${isSecondaryWindow})`);
+              return win.electron || null;
+            }
+            return null;
           };
 
           const finishInitialization = (currentState: any) => {
@@ -10002,6 +10204,13 @@ export const useStore = create<AppState>()(
             }
             const useSQLite = isDesktop && electronAPI && electronAPI.db;
 
+            const isSecondaryWindow = typeof window !== 'undefined' && (
+              window.location.hash.includes('kiosk') || 
+              window.location.hash.includes('customer-display') || 
+              window.location.pathname.includes('kiosk') || 
+              window.location.pathname.includes('customer-display')
+            );
+
             if (useSQLite) {
               try {
                 let hasLoadError = false;
@@ -10018,6 +10227,82 @@ export const useStore = create<AppState>()(
                     return null;
                   }
                 };
+
+                if (isSecondaryWindow) {
+                  console.info('[SQLite/Boot] Carregando persistência LEVE para janela secundária (Totem/Kiosk/Display)...');
+                  const [
+                    prods, clis, cats, subs, salesList,
+                    usersList, permissionsList, companySettingsList, systemSettingsList, pdvSettingsList, pdvTotemSettingsList, kioskTerminalsList
+                  ] = await Promise.all([
+                    safeList(electronAPI.db.listProducts(), 'products'),
+                    safeList(electronAPI.db.listClients(), 'clients'),
+                    safeList(electronAPI.db.listCategories(), 'categories'),
+                    safeList(electronAPI.db.listSubcategories(), 'subcategories'),
+                    safeList(electronAPI.db.listSales(), 'sales'),
+                    safeList(electronAPI.db.listUsers(), 'users'),
+                    safeList(electronAPI.db.listPermissions(), 'permissions'),
+                    safeList(electronAPI.db.listCompanySettings(), 'companySettings'),
+                    safeList(electronAPI.db.listSystemSettings(), 'systemSettings'),
+                    safeList(electronAPI.db.listPdvSettings(), 'pdvSettings'),
+                    safeList(electronAPI.db.listPdvTotemSettings(), 'pdvTotemSettings'),
+                    safeList(electronAPI.db.listKioskTerminals(), 'kioskTerminals')
+                  ]);
+
+                  const updates: any = {
+                    products: prods || [],
+                    clients: clis || [],
+                    categories: cats || [],
+                    subcategories: subs || [],
+                    sales: salesList || [],
+                    users: usersList || [],
+                    userRoles: permissionsList || [],
+                    terminals: kioskTerminalsList || [],
+                    activities: [],
+                    auditLogs: [],
+                    nfcPresenceRecords: [],
+                    preOrders: [],
+                    cashierHistory: [],
+                    financialTransactions: [],
+                    pendingSyncQueue: [],
+                    tombstones: [],
+                    productions: [],
+                    productionRuns: [],
+                    materials: [],
+                    machines: [],
+                    returns: [],
+                    consignmentRemittances: [],
+                    sqliteMigrationSafe: true,
+                    sqliteStatus: 'ready'
+                  };
+
+                  if (Array.isArray(companySettingsList) && companySettingsList.length > 0) {
+                    const companyDoc = companySettingsList.find((c: any) => c.id === 'company_info');
+                    if (companyDoc) {
+                      updates.company = companyDoc;
+                    }
+                  } else if (state.company) {
+                    updates.company = state.company;
+                  }
+
+                  if (Array.isArray(systemSettingsList) && systemSettingsList.length > 0) {
+                    const activePdvTotemConfig = systemSettingsList.find((s: any) => s.id === 'pdv_totem_settings_active');
+                    if (activePdvTotemConfig) {
+                      updates.activeTerminalId = activePdvTotemConfig.activeTerminalId || null;
+                    }
+                  }
+
+                  if (Array.isArray(pdvSettingsList) && pdvSettingsList.length > 0) {
+                    const pdvConfig = pdvSettingsList.find((p: any) => p.id === 'pdv_main_settings');
+                    if (pdvConfig && pdvConfig.activeTerminalId !== undefined) {
+                      updates.activeTerminalId = pdvConfig.activeTerminalId;
+                    }
+                  }
+
+                  state.setSQLiteData(updates);
+                  console.info('[SQLite/Boot] Hidratação LEVE concluída para janela secundária (Totem/Kiosk/Display) com sucesso.');
+                  finishInitialization(useStore.getState());
+                  return;
+                }
 
                 // 1. Query current SQLite tables first as a safety reference
                 let [
@@ -10620,7 +10905,7 @@ export const useStore = create<AppState>()(
                 // Cashier history & Session mapping
                 if (Array.isArray(cashierList)) {
                   if (cashierList.length > 0) {
-                    const opened = cashierList.find(c => c.status === 'aberto' || !c.closingTime);
+                    const opened = cashierList.find(c => c.status === 'open' || c.status === 'aberto' || !c.closingTime);
                     const closedList = cashierList.filter(c => c.id !== (opened ? opened.id : null));
                     updates.currentCashier = opened || null;
                     updates.cashierHistory = closedList;

@@ -6,6 +6,12 @@ const { spawn } = require('child_process');
 const { autoUpdater } = require('electron-updater');
 const isDev = !app.isPackaged;
 
+try {
+  require('dotenv').config();
+} catch (dotenvErr) {
+  console.warn('[Dotenv] Falha ao carregar dotenv no Electron main process:', dotenvErr);
+}
+
 const DB_FILENAME = 'nexa-local.db';
 
 // Request single instance lock
@@ -201,6 +207,7 @@ function rotateFileIfNeeded(filePath, maxSizeBytes = 1000 * 1024, maxBackups = 5
 }
 
 let mainWindow = null;
+let forceQuit = false;
 let kioskWindow = null;
 let customerDisplayWindow = null;
 let totemControlWindow = null;
@@ -447,6 +454,20 @@ function createWindow() {
     setupAutoUpdater(mainWindow);
   });
 
+  mainWindow.on('close', (e) => {
+    if (forceQuit) {
+      return;
+    }
+    e.preventDefault();
+    console.log('[Electron-Close] Prevenindo fechamento para execução de snapshot final...');
+    mainWindow.webContents.send('app-close-triggered');
+    // Forçar fechamento por timeout caso a página trave (10s limite prático)
+    setTimeout(() => {
+      forceQuit = true;
+      app.quit();
+    }, 10000);
+  });
+
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
@@ -455,6 +476,12 @@ function createWindow() {
 }
 
 // IPC Handlers
+ipcMain.handle('app:force-quit', () => {
+  console.log('[Electron-Close] Renderer autorizou o quit forçado após rotinas de segurança.');
+  forceQuit = true;
+  app.quit();
+});
+
 ipcMain.on('get-env-mode', (event) => {
   event.returnValue = isTestEnv ? 'teste' : 'producao';
 });
@@ -2466,12 +2493,37 @@ ipcMain.handle('toggle-kiosk-fullscreen', async (event) => {
   if (win && !win.isDestroyed()) {
     const isCurrentlyKiosk = win.isKiosk();
     const nextState = !isCurrentlyKiosk;
-    win.setKiosk(nextState);
+
     if (nextState) {
+      // Find matching physical display where this terminal window is currently located
+      const display = screen.getDisplayMatching(win.getBounds());
+      
+      // Force window to occupy the correct physical display workArea bounds entirely
+      win.setBounds(display.workArea);
+
+      // Disable window controls, dragging, closing, resizing, and system chrome
+      win.setMovable(false);
+      win.setResizable(false);
+      win.setClosable(false);
+      win.setMinimizable(false);
+      win.setMaximizable(false);
+
+      // Trigger native kiosk and full screen containment
+      win.setKiosk(true);
       win.setFullScreen(true);
     } else {
+      // Deactivate kiosk native restrictions
+      win.setKiosk(false);
       win.setFullScreen(false);
+
+      // Restore native window frame chrome, draggable capacity, resizing, and controllers
+      win.setMovable(true);
+      win.setResizable(true);
+      win.setClosable(true);
+      win.setMinimizable(true);
+      win.setMaximizable(true);
     }
+
     return { success: true, isKiosk: nextState };
   }
   return { success: false, error: 'Kiosk window is not open.' };
@@ -2606,6 +2658,198 @@ ipcMain.handle('open-customer-display-window', async () => {
   });
 
   return { success: true };
+});
+
+ipcMain.handle('google-drive:connect', async (event, args) => {
+  const clientId = (args && args.clientId) || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = (args && args.clientSecret) || process.env.GOOGLE_CLIENT_SECRET || '';
+
+  if (!clientId) {
+    return { 
+      success: false, 
+      error: 'ID do Cliente Google não configurado para o Desktop. Por favor, configure a chave GOOGLE_CLIENT_ID no seu painel ou no arquivo .env.' 
+    };
+  }
+
+  const http = require('http');
+
+  return new Promise((resolve) => {
+    let server;
+    let finished = false;
+
+    const cleanup = () => {
+      if (server) {
+        try {
+          server.close();
+        } catch (e) {}
+        server = null;
+      }
+    };
+
+    // Timeout of 3 minutes (180000 ms)
+    const timeoutId = setTimeout(() => {
+      if (!finished) {
+        finished = true;
+        cleanup();
+        resolve({ success: false, error: 'Tempo limite esgotado. A conexão com o Google Drive não foi autorizada a tempo.' });
+      }
+    }, 180000);
+
+    server = http.createServer(async (req, res) => {
+      const reqUrl = req.url || '';
+      if (reqUrl.includes('/oauth-callback')) {
+        const parsedUrl = new URL(reqUrl, `http://${req.headers.host || 'localhost'}`);
+        const code = parsedUrl.searchParams.get('code');
+        const errParam = parsedUrl.searchParams.get('error');
+
+        if (errParam) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<h1>Conexão Cancelada</h1><p>Autorização negada pelo usuário ou ocorreu um erro. Você já pode fechar esta guia.</p>');
+          if (!finished) {
+            finished = true;
+            clearTimeout(timeoutId);
+            cleanup();
+            resolve({ success: false, error: `Google OAuth error: ${errParam}` });
+          }
+          return;
+        }
+
+        if (code) {
+          res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<h1>Conexão Concluída!</h1><p>O Nexa ERP Industrial foi autorizado com sucesso no seu Google Drive. Você já pode fechar esta guia e retornar para o aplicativo.</p>');
+          
+          if (!finished) {
+            finished = true;
+            clearTimeout(timeoutId);
+            const boundPort = server.address().port;
+            cleanup();
+
+            try {
+              // Exchange code for tokens
+              const redirectUri = `http://localhost:${boundPort}/oauth-callback`;
+              const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: new URLSearchParams({
+                  code: code,
+                  client_id: clientId,
+                  client_secret: clientSecret,
+                  redirect_uri: redirectUri,
+                  grant_type: 'authorization_code'
+                })
+              });
+
+              if (!tokenResponse.ok) {
+                const errBody = await tokenResponse.text();
+                throw new Error(`Troca de token falhou: ${tokenResponse.statusText} (${errBody})`);
+              }
+
+              const tokens = await tokenResponse.json();
+
+              // Get User Profile
+              let googleUser = { displayName: 'Usuário Nexa GDrive', email: '', photoURL: null };
+              try {
+                const userResponse = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', {
+                  headers: { 'Authorization': `Bearer ${tokens.access_token}` }
+                });
+                if (userResponse.ok) {
+                  const u = await userResponse.json();
+                  googleUser = {
+                    displayName: u.name || u.given_name || 'Usuário Nexa GDrive',
+                    email: u.email || '',
+                    photoURL: u.picture || null
+                  };
+                }
+              } catch (uErr) {
+                console.warn('[GoogleDriveService][Desktop] Falha ao obter dados do perfil:', uErr);
+              }
+
+              resolve({
+                success: true,
+                tokens: {
+                  accessToken: tokens.access_token,
+                  refreshToken: tokens.refresh_token || '',
+                  expiresIn: tokens.expires_in,
+                  createdAt: Date.now()
+                },
+                user: googleUser
+              });
+            } catch (exchangeErr) {
+              resolve({ success: false, error: exchangeErr.message });
+            }
+          }
+        } else {
+          res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+          res.end('<h1>Código Inválido</h1><p>Falta o código de autorização.</p>');
+        }
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain' });
+        res.end('Not Found');
+      }
+    });
+
+    server.listen(0, '127.0.0.1', () => {
+      const port = server.address().port;
+      const redirectUri = `http://localhost:${port}/oauth-callback`;
+      
+      const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?` + new URLSearchParams({
+        client_id: clientId,
+        redirect_uri: redirectUri,
+        response_type: 'code',
+        scope: 'https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.profile https://www.googleapis.com/auth/userinfo.email',
+        access_type: 'offline',
+        prompt: 'consent'
+      }).toString();
+
+      shell.openExternal(authUrl).catch(e => {
+        finished = true;
+        clearTimeout(timeoutId);
+        cleanup();
+        resolve({ success: false, error: `Não foi possível abrir o navegador: ${e.message}` });
+      });
+    });
+  });
+});
+
+ipcMain.handle('google-drive:refresh', async (event, args) => {
+  const refreshToken = args && args.refreshToken;
+  const clientId = (args && args.clientId) || process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = (args && args.clientSecret) || process.env.GOOGLE_CLIENT_SECRET || '';
+
+  if (!refreshToken) {
+    return { success: false, error: 'Token de atualização (Refresh Token) ausente.' };
+  }
+  if (!clientId) {
+    return { success: false, error: 'Chave GOOGLE_CLIENT_ID ausente para atualização de token.' };
+  }
+
+  try {
+    const response = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        refresh_token: refreshToken,
+        grant_type: 'refresh_token'
+      })
+    });
+
+    if (!response.ok) {
+      const errBody = await response.text();
+      return { success: false, error: `Falha na renovação do token do Google Drive: ${errBody}` };
+    }
+
+    const data = await response.json();
+    return {
+      success: true,
+      accessToken: data.access_token,
+      expiresIn: data.expires_in,
+      createdAt: Date.now()
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
 });
 
 if (process.platform === 'linux') {

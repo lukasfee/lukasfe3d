@@ -16,6 +16,7 @@ export const operationalValidationService = {
   // ==========================================
 
   STATUS_RANK: {
+    'em_producao': 0,
     'aguardando_separacao': 1,
     'enviado_separacao': 2,
     'em_separacao': 3,
@@ -28,6 +29,7 @@ export const operationalValidationService = {
   } as Record<string, number>,
 
   STATUS_LABELS: {
+    'em_producao': 'Em Produção',
     'aguardando_separacao': 'Aguardando Separação',
     'enviado_separacao': 'Enviado para Separação',
     'em_separacao': 'Em Separação',

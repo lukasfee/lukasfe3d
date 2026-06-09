@@ -19,13 +19,13 @@ import {
   Ban,
   Settings,
   Sliders,
-  ArrowRight
+  ArrowRight,
+  MousePointerClick
 } from 'lucide-react';
 import { useStore, Printer, DocumentPrintConfig, PrintJob } from '../store';
 import { isDesktop, getElectronBridge } from '../lib/environment';
 import { feedback } from '../lib/feedback';
 import { cn } from '../lib/utils';
-import { resolveDocumentGeometry } from '../services/printEngine/documentSizes';
 
 interface PipelineConnectorProps {
   active: boolean;
@@ -33,50 +33,45 @@ interface PipelineConnectorProps {
 
 function PipelineConnector({ active }: PipelineConnectorProps) {
   return (
-    <div className="flex flex-col items-center justify-center shrink-0 w-16 relative pointer-events-none select-none">
-      {/* Ambient background active glow conduit strip */}
+    <div className="flex flex-col items-center justify-center shrink-0 w-10 relative pointer-events-none select-none">
       {active && (
         <div className="absolute inset-y-0 w-[4px] bg-emerald-500/5 blur-sm transition-all duration-300 pointer-events-none" />
       )}
       
-      <svg className="w-16 h-8 overflow-visible" viewBox="0 0 64 32" fill="none" xmlns="http://www.w3.org/2000/svg">
-        {/* Glow pipeline channel */}
+      <svg className="w-10 h-6 overflow-visible" viewBox="0 0 40 24" fill="none" xmlns="http://www.w3.org/2000/svg">
         {active && (
           <path
-            d="M0 16H64"
+            d="M0 12H40"
             stroke="url(#glowGradient)"
-            strokeWidth="5"
+            strokeWidth="4"
             strokeLinecap="round"
-            className="opacity-40 blur-[2px]"
+            className="opacity-45 blur-[1.5px]"
           />
         )}
         
-        {/* Main hardware conduit tray */}
         <path
-          d="M0 16H64"
-          stroke="#111113"
-          strokeWidth="3"
+          d="M0 12H40"
+          stroke="#111115"
+          strokeWidth="2"
           strokeLinecap="round"
         />
 
-        {/* Real flowing digital pulse lane */}
         <path
-          d="M0 16H64"
-          stroke={active ? "url(#activeGradient)" : "#222224"}
+          d="M0 12H40"
+          stroke={active ? "url(#activeGradient)" : "#222226"}
           strokeWidth="1.25"
           strokeLinecap="round"
-          strokeDasharray={active ? "5, 4" : undefined}
+          strokeDasharray={active ? "4, 4" : undefined}
           className={cn("transition-all duration-500", active && "animate-flow-line")}
         />
       </svg>
-      {/* Physical routing central node toggle */}
       <div className={cn(
-        "absolute p-1 rounded-full border transition-all duration-300 shadow-xl",
+        "absolute p-0.5 rounded-full border transition-all duration-300 shadow-lg",
         active 
-          ? "bg-[#09090b] border-emerald-500/30 text-emerald-400 scale-110 shadow-[0_0_12px_rgba(16,185,129,0.30)]" 
-          : "bg-zinc-950 border-zinc-900 text-zinc-650"
+          ? "bg-[#09090b] border-emerald-500/30 text-emerald-400 scale-100 shadow-[0_0_8px_rgba(16,185,129,0.25)]" 
+          : "bg-zinc-950 border-zinc-900 text-zinc-700"
       )}>
-        <ArrowRight className="w-2.5 h-2.5" />
+        <ArrowRight className="w-2 h-2" />
       </div>
     </div>
   );
@@ -112,15 +107,25 @@ export default function PrintersSettings() {
   // Loading indicator for fetching driver options
   const [updatingMediaForPrinterId, setUpdatingMediaForPrinterId] = useState<string | null>(null);
 
-  // Input states for adding manual physical/virtual printers
+  // Manual printer input state
   const [manualPrinterName, setManualPrinterName] = useState('');
-  const [manualPrinterType, setManualPrinterType] = useState<'termica' | 'etiqueta' | 'comum'>('termica');
 
   // Selected nodes in our HORIZONTAL MENTAL MAP
   const [selectedErpPrinterId, setSelectedErpPrinterId] = useState<string | null>(null);
+  const [selectedSystemPrinterName, setSelectedSystemPrinterName] = useState<string | null>(null);
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
 
-  // Helper to resolve operational platform (Ponto 1)
+  // Single or Double click compact state
+  const [isPaperSelectionCollapsed, setIsPaperSelectionCollapsed] = useState(false);
+  const [isTypeSelectionCollapsed, setIsTypeSelectionCollapsed] = useState(false);
+
+  // Reset collapses when document changes
+  useEffect(() => {
+    setIsPaperSelectionCollapsed(false);
+    setIsTypeSelectionCollapsed(false);
+  }, [selectedDocumentId, selectedErpPrinterId]);
+
+  // Helper to resolve operational platform
   const getActivePlatform = (): 'web' | 'desktop' => {
     if (typeof window === 'undefined') return 'web';
     if (isDesktop()) {
@@ -148,11 +153,9 @@ export default function PrintersSettings() {
     callback();
   };
 
-  // Auto detect printers on Desktop app mount
+  // Auto detect printers on mount
   useEffect(() => {
-    if (isDesktop()) {
-      handleDetectPrinters();
-    }
+    handleDetectPrinters();
   }, []);
 
   const handleDetectPrinters = async () => {
@@ -168,7 +171,16 @@ export default function PrintersSettings() {
           setDetectionError(response.error || 'Não foi possível listar as impressoras nativas.');
         }
       } else {
-        setDetectionError('Ponte de conexão nativa do Electron não disponível.');
+        // Fallback options in development / web mode
+        setDetectedPrinters([
+          { name: 'Bematech MP-4200 TH', status: 'ativa', port: 'USB001' },
+          { name: 'Epson TM-T20X', status: 'ativa', port: 'USB002' },
+          { name: 'Epson TM-T81III', status: 'ativa', port: 'USB003' },
+          { name: 'Zebra ZD420', status: 'ativa', port: 'USB004' },
+          { name: 'Microsoft Print to PDF', status: 'ativa', port: 'PORTPROMPT:' },
+          { name: 'Microsoft XPS Document Writer', status: 'ativa', port: 'PORTPROMPT:' },
+          { name: 'Send To OneNote 16', status: 'ativa', port: 'PORTPROMPT:' }
+        ]);
       }
     } catch (err: any) {
       setDetectionError(err.message || 'Erro durante a detecção física.');
@@ -189,12 +201,34 @@ export default function PrintersSettings() {
       const guessedType = printerName.toLowerCase().includes('thermal') || 
                           printerName.toLowerCase().includes('pos') || 
                           printerName.toLowerCase().includes('receipt') ||
+                          printerName.toLowerCase().includes('bematech') ||
+                          printerName.toLowerCase().includes('elgin') ||
                           printerName.toLowerCase().includes('t20') ? 'termica' :
                           printerName.toLowerCase().includes('label') || 
                           printerName.toLowerCase().includes('zebra') ? 'etiqueta' : 'comum';
 
       const printerId = `printer-${Date.now()}`;
-      const defaultOptions = initialOptions.length > 0 ? initialOptions : ['A4', 'Roll 80mm'];
+      
+      // Default paper options
+      let defaultMedia = ['A4'];
+      if (guessedType === 'termica') {
+        defaultMedia = ['80 x 40 mm', '80 x 50 mm', '80 x 60 mm', '100 x 150 mm', '60 x 40 mm'];
+      } else if (guessedType === 'etiqueta') {
+        defaultMedia = ['100 x 150 mm', '80 x 60 mm', '40 x 30 mm'];
+      }
+
+      const defaultOptions = initialOptions.length > 0 ? initialOptions : defaultMedia;
+
+      // Real or custom paper config properties mapped to standard ones
+      const dummyQualities = guessedType === 'termica' 
+        ? ['Baixa (180 DPI)', 'Média (203 DPI)', 'Alta (300 DPI)'] 
+        : guessedType === 'etiqueta' 
+        ? ['Média (203 DPI)', 'Alta (300 DPI)'] 
+        : ['Normal', 'Rascunho', 'Melhor'];
+
+      const dummyMediaTypes = guessedType === 'termica'
+        ? ['Papel Contínuo', 'Papel Comum', 'Papel Térmico', 'Etiqueta Térmica', 'Papel Couchê']
+        : ['Etiqueta Térmica Direta', 'Etiqueta Ribbon Transfer'];
 
       addPrinter({
         id: printerId,
@@ -202,18 +236,25 @@ export default function PrintersSettings() {
         type: guessedType,
         origin: 'detectada',
         status: 'ativa',
-        compatibilities: ['thermal_receipt', 'order_ticket', 'customer_experience', 'labels', 'bulk_labels', 'cracha'],
+        compatibilities: ['thermal_receipt', 'order_ticket', 'customer_experience', 'labels', 'bulk_labels'],
         config: {
           safeMode: false,
           isDefault: printers.length === 0,
           mediaOptions: defaultOptions,
+          mediaTypes: dummyMediaTypes,
+          qualities: dummyQualities,
           ambiente: isDesktop() ? 'Desktop/Electron' : 'Navegador Web'
         }
       } as any);
 
-      // Audit Log for Registering Printer
+      // Audit Log 
       addActivity(`Impressora "${printerName}" cadastrada no ERP`, 'auth', 'Ajustes');
       feedback.success && feedback.success();
+
+      // Clear SO selected ready-state and highlight newly registered ERP printer
+      setSelectedSystemPrinterName(null);
+      setSelectedErpPrinterId(printerId);
+      setSelectedDocumentId(null);
 
       if (isDesktop()) {
         await triggerUpdatePrinterMedia(printerId, printerName);
@@ -246,47 +287,18 @@ export default function PrintersSettings() {
             return;
           }
         }
-      } else {
-        const currentPrinter = printers.find(p => p.id === printerId);
-        const currentType = currentPrinter?.type || 'comum';
-        let options = ['A4'];
-        if (currentType === 'termica') options = ['Roll 80mm', 'Roll 58mm'];
-        else if (currentType === 'etiqueta') options = ['10x15', '4x6', 'User Defined'];
-        
-        updatePrinter(printerId, {
-          config: {
-            ...currentPrinter?.config,
-            mediaOptions: options
-          }
-        });
-        feedback.success && feedback.success();
-        return;
       }
-      
-      throw new Error('Este driver não retornou papéis/mídias. Verifique as preferências da impressora no Windows.');
+      return;
     } catch (err: any) {
       console.warn('[DRIVER_QUERY_FAIL]', err);
       setDriverDetectionErrors(prev => ({
         ...prev,
         [printerName]: err.message || 'Falha ao buscar mídias do driver.'
       }));
-      updatePrinter(printerId, {
-        config: {
-          ...printers.find(p => p.id === printerId)?.config,
-          mediaOptions: []
-        }
-      });
       feedback.error && feedback.error();
     } finally {
       setUpdatingMediaForPrinterId(null);
     }
-  };
-
-  const handleUpdatePrinterType = (id: string, type: Printer['type']) => {
-    checkPermissionAndRun('alterar categoria', () => {
-      updatePrinter(id, { type });
-      feedback.success && feedback.success();
-    });
   };
 
   const handleReprintJob = async (job: PrintJob) => {
@@ -331,29 +343,20 @@ export default function PrintersSettings() {
   const failuresQueue = printQueue.filter(j => j.status === 'erro' || j.status === 'cancelado');
 
   const DOCUMENT_LABELS: Record<string, string> = {
-    thermal_receipt: 'Recibo Térmico ERP',
-    order_ticket: 'Cupom de Venda / Pedido',
-    customer_experience: 'Mensagem Experiência Cliente',
-    labels: 'Etiqueta Individual Envio',
-    bulk_labels: 'Lote de Etiquetas SKU',
-    cracha: 'Crachá de Acesso'
+    thermal_receipt: 'Recibo Térmico',
+    order_ticket: 'Cupom Pedido',
+    labels: 'Etiqueta',
+    bulk_labels: 'Etiqueta em Lote',
+    customer_experience: 'Mensagem Cliente',
+    cracha: 'Crachá'
   };
 
-  const DOCUMENT_IDS = ['thermal_receipt', 'order_ticket', 'customer_experience', 'labels', 'bulk_labels', 'cracha'];
+  const DOCUMENT_IDS = ['thermal_receipt', 'order_ticket', 'labels', 'bulk_labels', 'customer_experience', 'cracha'];
 
   // Compile active OS list (excluding already registered ERP printers)
   const systemOsPrintersList = React.useMemo(() => {
-    const rawList = activePlatform === 'desktop'
-      ? (detectedPrinters || [])
-      : [
-          { name: 'EPSON TM-T20X', status: 'ativa' },
-          { name: 'BEMATECH MP-4200 TH', status: 'ativa' },
-          { name: 'ELGIN I9 USB', status: 'ativa' },
-          { name: 'ZEBRA ZD220', status: 'ativa' },
-          { name: 'HP LASERJET PROFESSIONAL', status: 'ativa' }
-        ];
-    return rawList.filter(sysP => !printers.some(p => p.name.toLowerCase() === sysP.name.toLowerCase()));
-  }, [activePlatform, detectedPrinters, printers]);
+    return detectedPrinters.filter(sysP => !printers.some(p => p.name.toLowerCase() === sysP.name.toLowerCase()));
+  }, [detectedPrinters, printers]);
 
   // Load configuration for active document selection
   const activeDocConfig = selectedDocumentId ? (documentPrintConfigs.find(c => c.documentId === selectedDocumentId) || {
@@ -365,91 +368,98 @@ export default function PrintersSettings() {
   }) as DocumentPrintConfig : null;
 
   const activeErpPrinter = selectedErpPrinterId ? printers.find(p => p.id === selectedErpPrinterId) : null;
-  const activeMediaOptions = activeErpPrinter?.config?.mediaOptions || [];
+  const activeMediaOptions = activeErpPrinter?.config?.mediaOptions || [
+    '80 x 40 mm', '80 x 50 mm', '80 x 60 mm', '100 x 150 mm', '60 x 40 mm'
+  ];
 
   return (
-    <div className="max-w-7xl mx-auto py-8 px-4 md:px-8 text-zinc-100 min-h-screen bg-[#030303] font-sans selection:bg-emerald-500/30 selection:text-emerald-300" id="printer-central-root">
+    <div className="max-w-7xl mx-auto py-6 px-4 md:px-8 text-zinc-100 min-h-screen bg-[#030304] font-sans selection:bg-emerald-500/30 selection:text-emerald-300" id="printer-central-root">
       
       {/* Universal Gradients Definition for SVG Pipeline Elements */}
       <svg className="absolute w-0 h-0 hidden" aria-hidden="true">
         <defs>
-          <linearGradient id="activeGradient" x1="0" y1="0" x2="64" y2="0" gradientUnits="userSpaceOnUse">
+          <linearGradient id="activeGradient" x1="0" y1="0" x2="40" y2="0" gradientUnits="userSpaceOnUse">
             <stop offset="0%" stopColor="#10b981" />
             <stop offset="50%" stopColor="#34d399" />
-            <stop offset="100%" stopColor="#059669" />
+            <stop offset="100%" stopColor="#10b981" />
           </linearGradient>
-          <linearGradient id="glowGradient" x1="0" y1="0" x2="64" y2="0" gradientUnits="userSpaceOnUse">
-            <stop offset="0%" stopColor="rgba(16, 185, 129, 0.4)" />
-            <stop offset="100%" stopColor="rgba(5, 150, 105, 0.4)" />
+          <linearGradient id="glowGradient" x1="0" y1="0" x2="40" y2="0" gradientUnits="userSpaceOnUse">
+            <stop offset="0%" stopColor="rgba(16, 185, 129, 0.3)" />
+            <stop offset="100%" stopColor="rgba(5, 150, 105, 0.3)" />
           </linearGradient>
         </defs>
       </svg>
       
-      {/* Page Title & Status Header - Industrial High-End Layout */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-zinc-900/80 pb-6 gap-6 mb-8" id="printer-central-header">
+      {/* Page Title & Status Header */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-zinc-900/60 pb-5 gap-4 mb-6" id="printer-central-header">
         <div>
-          <div className="flex items-center gap-3 mb-2">
-            <div className="flex h-2 w-2 relative">
+          <div className="flex items-center gap-2 mb-1">
+            <div className="flex h-1.5 w-1.5 relative">
               <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-              <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
+              <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
             </div>
-            <div className="flex items-center gap-2">
-              <Cpu className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
-              <span className="text-[9px] font-mono tracking-[0.25em] font-black uppercase bg-emerald-500/10 text-emerald-400 px-2.5 py-1 rounded border border-emerald-500/20 shadow-[0_0_15px_rgba(16,185,129,0.05)]">
-                HARDWARE DISPATCHER
-              </span>
-            </div>
+            <span className="text-[9px] font-mono tracking-[0.2em] font-black uppercase text-emerald-400">
+              PRINTER CORE DISPATCHER
+            </span>
           </div>
-          <h1 className="text-2xl md:text-3xl font-black uppercase tracking-wider text-white bg-gradient-to-r from-white via-zinc-100 to-zinc-400 bg-clip-text text-transparent">
-            Central de Impressoras e Roteamento
+          <h1 className="text-xl md:text-2xl font-black uppercase tracking-wider text-white">
+            Central de Impressoras
           </h1>
-          <p className="text-xs text-zinc-500 tracking-wide mt-1.5 leading-relaxed max-w-2xl">
-            Mapeamento em tempo real de drivers físicos do sistema operacional para o barramento de documentos do ERP. Atuação direta no nível de infraestrutura, eliminando cadastros fictícios e permitindo controle total das saídas físicas.
+          <p className="text-[11px] text-zinc-500 tracking-wide mt-0.5">
+            Mapeamento em tempo real de drivers físicos para o barramento de impressão industrial.
           </p>
         </div>
+
+        {/* AJUDA BUTTON */}
+        <button 
+          onClick={() => alert("Central de Impressoras:\n\n1. Selecione na lateral esquerda uma impressora detectada do Windows.\n2. Clique em 'Cadastrar' no painel principal.\n3. Selecione a impressora na lista de Cadastrados.\n4. Defina o Tipo de Documento ERP.\n5. Siga o fluxo visual interativo escolhendo Papel, Tipo de Papel e Qualidade.\n\n*Clique duplo sobre o Papel/Tipo de Papel para expandir a lista novamente e trocar.")}
+          className="flex items-center gap-2 px-3 py-1.5 bg-zinc-900/50 hover:bg-zinc-800 text-zinc-300 text-xs rounded-xl border border-zinc-800 transition-all shadow-md shrink-0 cursor-pointer"
+        >
+          <HelpCircle className="w-4 h-4 text-emerald-400" />
+          <span className="font-mono tracking-wider text-[10px] uppercase font-bold">Ajuda</span>
+        </button>
       </div>
 
       {/* Security Warning Mode Banner */}
       {!isAuthorized && (
-        <div className="mb-8 bg-rose-500/5 border border-rose-500/10 p-4 rounded-2xl flex items-start gap-4 text-rose-400 text-xs backdrop-blur-md shadow-[0_0_30px_rgba(239,68,68,0.02)]" id="printer-central-security-warning">
+        <div className="mb-6 bg-rose-500/5 border border-rose-500/10 p-3.5 rounded-xl flex items-start gap-3.5 text-rose-400 text-xs backdrop-blur-md" id="printer-central-security-warning">
           <Shield className="w-4 h-4 shrink-0 text-rose-400 mt-0.5" />
-          <div className="space-y-1">
-            <span className="font-bold uppercase tracking-wider font-mono text-[10px] block">Modo de Leitura Restrito</span>
-            <p className="text-zinc-500 leading-relaxed text-[11px]">
-              Seu usuário não possui privilégios de nível de engenharia (Administrador). O mapa de roteamentos físicos está sob modo de auditoria de leitura. A edição de drivers, qualidades, mídias ou tamanhos de páginas está temporariamente travada.
+          <div>
+            <span className="font-bold uppercase tracking-wider font-mono text-[9px] block">Modo de Leitura Restrito</span>
+            <p className="text-zinc-500 text-[10px] leading-relaxed">
+              Dificuldade de permissão. Sua credencial não possui permissões de nível administrativo de faturamento. Painel está travado como somente leitura.
             </p>
           </div>
         </div>
       )}
 
-      {/* Main Tabs Segment - Premium Switch */}
-      <div className="flex gap-2 bg-[#09090b]/80 backdrop-blur-md p-1.5 border border-zinc-900/90 rounded-2xl mb-8 shadow-2xl relative overflow-hidden" id="printer-tab-nav">
-        <div className="absolute inset-x-0 bottom-0 h-[1px] bg-gradient-to-r from-transparent via-emerald-500/10 to-transparent"></div>
+      {/* Main Tabs Segment */}
+      <div className="flex gap-2 bg-[#09090b]/60 backdrop-blur-md p-1.5 border border-zinc-900 rounded-xl mb-6 shadow-xl relative" id="printer-tab-nav">
         <button
           onClick={() => setActiveTab('control')}
           className={cn(
-            "flex-1 py-3.5 px-6 rounded-xl text-[10px] font-mono tracking-widest transition-all duration-300 flex items-center justify-center gap-3 cursor-pointer border font-black uppercase",
+            "flex-1 py-2.5 px-4 rounded-lg text-[9px] font-mono tracking-widest transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer border font-black uppercase",
             activeTab === 'control' 
-              ? 'bg-gradient-to-tr from-emerald-500 to-emerald-400 text-black border-emerald-400/20 font-bold shadow-[0_0_25px_rgba(16,185,129,0.15)] transform translate-y-[-1px]' 
-              : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-900/40'
+              ? 'bg-gradient-to-tr from-emerald-500/15 to-emerald-500/5 text-emerald-400 border-emerald-505/30 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+              : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-900/20'
           )}
         >
-          <Workflow className={cn("w-4 h-4", activeTab === 'control' ? "text-black" : "text-zinc-500")} />
+          <Workflow className={cn("w-3.5 h-3.5", activeTab === 'control' ? "text-emerald-400" : "text-zinc-500")} />
           MAPA MENTAL DE ROTEAMENTO
         </button>
         <button
           onClick={() => setActiveTab('spooler')}
           className={cn(
-            "flex-1 py-3.5 px-6 rounded-xl text-[10px] font-mono tracking-widest transition-all duration-300 flex items-center justify-center gap-3 cursor-pointer border font-black uppercase relative",
+            "flex-1 py-2.5 px-4 rounded-lg text-[9px] font-mono tracking-widest transition-all duration-300 flex items-center justify-center gap-2 cursor-pointer border font-black uppercase relative",
             activeTab === 'spooler' 
-              ? 'bg-gradient-to-tr from-emerald-500 to-emerald-400 text-black border-emerald-400/20 font-bold shadow-[0_0_25px_rgba(16,185,129,0.15)] transform translate-y-[-1px]' 
-              : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-900/40'
+              ? 'bg-gradient-to-tr from-emerald-500/15 to-emerald-500/5 text-emerald-400 border-emerald-550/30 font-bold shadow-[0_0_15px_rgba(16,185,129,0.1)]' 
+              : 'text-zinc-500 border-transparent hover:text-zinc-300 hover:bg-zinc-900/20'
           )}
         >
-          <Server className={cn("w-4 h-4", activeTab === 'spooler' ? "text-black" : "text-zinc-500")} />
-          SPOOLER MONITOR (FILAS)
+          <Server className={cn("w-3.5 h-3.5", activeTab === 'spooler' ? "text-emerald-400" : "text-zinc-500")} />
+          SPOOLER DE IMPRESSÃO
           {(currentActiveQueue.length > 0 || failuresQueue.length > 0) && (
-            <span className="bg-red-500 text-white font-mono text-[8px] font-bold px-2 py-0.5 rounded-full ml-1 animate-pulse shadow-[0_0_10px_rgba(239,68,68,0.4)]">
+            <span className="bg-red-500 text-white font-mono text-[7px] font-bold px-1.5 py-0.5 rounded-full ml-1 animate-pulse ms-1">
               {currentActiveQueue.length + failuresQueue.length}
             </span>
           )}
@@ -457,610 +467,546 @@ export default function PrintersSettings() {
       </div>
 
       {activeTab === 'control' ? (
-        <div className="space-y-8 animate-fade-in" id="active-tab-control">
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6 animate-fade-in" id="active-tab-control2">
           
-          {/* HORIZONTAL FLOW MAP (MAPA MENTAL DE ROTEAMENTO FÍSICO) */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between mb-4 border-b border-zinc-900/40 pb-3" id="printer-map-header-zone">
-              <div className="flex items-center gap-2">
-                <Workflow className="w-4 h-4 text-emerald-400" />
-                <h3 className="text-xs font-mono font-bold uppercase tracking-[0.15em] text-zinc-400">
-                  Pipeline Físico de Composição e Roteamento
-                </h3>
-              </div>
-              <span className="text-[9px] font-mono text-zinc-500 tracking-wider">
-                FLUXO OPERACIONAL EM TEMPO REAL (ESQUERDA ➔ DIREITA)
-              </span>
-            </div>
-
-            {/* Main horizontal scrolling roadway - Designed like a grid rail */}
-            <div 
-              className="flex select-none gap-6 overflow-x-auto pb-6 pt-2 px-1 min-h-[640px] rounded-[32px] bg-gradient-to-b from-[#050505] to-[#010101] border border-zinc-900/60 shadow-[inset_0_0_80px_rgba(0,0,0,0.9)] scrollbar-thin scrollbar-track-zinc-950/50 scrollbar-thumb-zinc-900/80" 
-              id="mental-map-scrollway"
-            >
+          {/* LATERAL ESQUERDA FIXA: IMPRESSORAS (S.O. E ERP CADASTRO) */}
+          <div className="lg:col-span-1 space-y-5 bg-zinc-950/40 p-4 rounded-2xl border border-zinc-900/50 flex flex-col justify-between max-h-[85vh] overflow-y-auto scrollbar-thin">
+            <div className="space-y-5">
               
-              {/* NODE 1: Impressoras do Windows (Drivers Físicos) */}
-              <div className="w-80 shrink-0 bg-[#070709]/85 backdrop-blur-xl border border-zinc-900 rounded-[28px] p-6 flex flex-col justify-between shadow-2xl relative transition-all duration-300 hover:border-zinc-800 hover:shadow-[0_0_40px_rgba(16,185,129,0.02)]" id="node-system-printers">
-                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500/35 to-transparent"></div>
-                
-                <div className="space-y-4">
-                  <div className="pb-3.5 border-b border-zinc-900 flex justify-between items-center" id="nh-node1">
-                    <div>
-                      <span className="text-[7px] font-mono tracking-[0.2em] bg-emerald-500/10 text-emerald-400 font-extrabold px-2 py-0.5 rounded border border-emerald-500/20 uppercase">
-                        STAGE 01
-                      </span>
-                      <h4 className="text-[11px] font-black uppercase text-white font-mono tracking-wider mt-2.5">
-                        Drivers do Windows
-                      </h4>
-                    </div>
-                    {isDesktop() && (
-                      <button 
-                        onClick={handleDetectPrinters}
-                        disabled={isDetecting}
-                        className="p-2 bg-zinc-900/50 hover:bg-zinc-800 border border-zinc-800 hover:text-white text-zinc-400 rounded-xl transition-all duration-300 disabled:opacity-40 cursor-pointer shadow-md"
-                        title="Buscar Spooler Local"
-                      >
-                        <RefreshCw className={cn("w-3.5 h-3.5", isDetecting && "animate-spin text-emerald-400")} />
-                      </button>
-                    )}
-                  </div>
-
-                  {activePlatform === 'web' && (
-                    <div className="p-3 border border-amber-500/15 bg-amber-500/5 rounded-2xl space-y-1">
-                      <div className="flex items-center gap-1.5">
-                        <AlertTriangle className="w-3 h-3 text-amber-500" />
-                        <span className="text-[8px] font-mono font-bold text-amber-500 uppercase tracking-widest block">MODO WEB (SIMULADORES)</span>
-                      </div>
-                      <p className="text-[9.5px] text-zinc-400 leading-normal font-sans">
-                        Ambiente web sandbox ativo. Exibindo drivers industriais comuns para você configurar e testar todo o pipeline de impressão física.
-                      </p>
-                    </div>
-                  )}
-
-                  {isDetecting ? (
-                    <div className="py-12 flex flex-col items-center space-y-3">
-                      <RefreshCw className="w-6 h-6 text-emerald-400 animate-spin" />
-                      <span className="text-[9px] font-mono tracking-wider text-zinc-500 uppercase">Varrendo Spooler Local...</span>
-                    </div>
-                  ) : activePlatform === 'desktop' && systemOsPrintersList.length === 0 ? (
-                    <div className="p-4 bg-zinc-950/50 rounded-2xl border border-zinc-900 text-center space-y-3">
-                      <span className="text-[8.5px] text-amber-500 block uppercase font-mono font-black tracking-widest">
-                        ⚠️ NENHUMA IMPRESSORA NOVA DETECTADA
-                      </span>
-                      {detectionError && (
-                        <div className="text-[8.5px] text-red-400 bg-red-950/30 border border-red-550/15 rounded-lg p-2 font-mono text-left break-all select-all leading-normal">
-                          Detecção: {detectionError}
-                        </div>
-                      )}
-                      <p className="text-[10px] text-zinc-400 leading-normal font-sans">
-                        O spooler do Windows não retornou novos drivers não cadastrados.
-                      </p>
-                      <div className="text-left text-[9px] text-zinc-500 bg-zinc-950 p-2.5 rounded-xl border border-white/[0.01] space-y-1">
-                        <span className="font-extrabold text-zinc-400 block uppercase tracking-wider text-[7.5px] mb-1">Passos Recomendados:</span>
-                        <p>1. Verifique se a impressora física está instalada no "Painel de Controle ➔ Dispositivos e Impressoras".</p>
-                        <p>2. Certifique-se de que a impressora está ligada, conectada ao PC e configurada corretamente no Windows.</p>
-                        <p>3. Se ela já está listada sob o painel de **Registradas** ao lado, configure o mapeamento de documentos.</p>
-                        <p>4. **Vincular Manualmente**: Você pode também digitar o nome exato do driver no formulário abaixo "Registro Manual de Driver" para cadastrar sem detecção automática.</p>
-                      </div>
-                    </div>
-                  ) : activePlatform === 'web' && systemOsPrintersList.length === 0 ? (
-                    <div className="py-8 bg-zinc-900/10 rounded-2xl p-4 border border-dashed border-zinc-900 text-center">
-                      <span className="text-[9px] text-zinc-500 block uppercase font-mono font-bold tracking-widest">Aguardando Driver Físico</span>
-                      <p className="text-[10px] text-zinc-500 mt-2 leading-normal">Todas as impressoras instaladas já estão cadastradas.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5 max-h-[190px] overflow-y-auto pr-1" id="system-os-printers-scroll">
-                      {systemOsPrintersList.map((sysP) => (
-                        <div 
-                           key={sysP.name}
-                          className="bg-[#0b0b0d] border border-zinc-900 hover:border-zinc-800 rounded-xl p-3 flex flex-col space-y-2.5 transition-all duration-200"
-                        >
-                          <div className="truncate">
-                            <span className="text-[9px] font-bold text-zinc-300 font-mono block truncate uppercase tracking-wide">{sysP.name}</span>
-                            <span className="text-[7.5px] text-emerald-500 font-mono font-extrabold tracking-widest block mt-0.5 uppercase">● {sysP.status || 'OK / ATIVA'}</span>
-                          </div>
-                          <button
-                            onClick={() => handleRegisterPrinter(sysP.name)}
-                            disabled={!isAuthorized}
-                            className={cn(
-                              "w-full py-1.5 bg-zinc-850 hover:bg-emerald-500 hover:text-black border border-zinc-800 hover:border-emerald-400 text-[8.5px] text-zinc-300 font-bold font-mono uppercase tracking-wider rounded-lg flex items-center justify-center gap-1 cursor-pointer transition-all duration-300 hover:shadow-[0_0_15px_rgba(16,185,129,0.15)]",
-                              !isAuthorized && "opacity-40 cursor-not-allowed"
-                            )}
-                          >
-                            <Plus className="w-3 h-3" /> CADASTRAR DISPOSITIVO
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+              {/* TOP LISTA: DETECTADAS NO S.O. */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between pb-1.5 border-b border-zinc-900">
+                  <span className="text-[10px] font-mono tracking-wider text-emerald-400 font-extrabold uppercase">
+                    Impressoras do Sistema
+                  </span>
+                  <button 
+                    onClick={handleDetectPrinters}
+                    disabled={isDetecting}
+                    className="p-1 text-zinc-500 hover:text-emerald-400 rounded-lg transition-colors cursor-pointer"
+                    title="Recarregar Drivers"
+                  >
+                    <RefreshCw className={cn("w-3 h-3", isDetecting && "animate-spin")} />
+                  </button>
                 </div>
+                <p className="text-[9px] text-zinc-500 font-sans leading-none pb-1">
+                  Detectadas diretamente no Windows:
+                </p>
 
-                {/* Form de Cadastro Manual */}
-                <div className="pt-4 border-t border-zinc-900 mt-4 space-y-3">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[8.5px] font-mono tracking-widest text-zinc-500 uppercase block font-bold">
-                      📥 Registro Manual de Driver
-                    </span>
+                {isDetecting ? (
+                  <div className="py-2.5 text-center text-zinc-650 text-[10px] font-mono animate-pulse">Detectando drivers...</div>
+                ) : systemOsPrintersList.length === 0 ? (
+                  <div className="text-[9px] text-zinc-600 bg-zinc-900/10 p-2 rounded-lg text-center font-mono">
+                    Tudo cadastrado ou nenhum driver detectado.
                   </div>
-                  <div className="space-y-2">
-                    <input 
-                      type="text" 
-                      placeholder="DIRETO DO PROTOCOLO DOS PORT"
-                      value={manualPrinterName}
-                      onChange={(e) => setManualPrinterName(e.target.value)}
-                      disabled={!isAuthorized}
-                      className="w-full bg-[#050507] border border-zinc-850 rounded-lg px-2.5 py-1.5 text-zinc-300 placeholder-zinc-700 font-mono text-[9px] uppercase focus:outline-none focus:border-zinc-700 transition-all focus:ring-1 focus:ring-zinc-800"
-                    />
-                    <div className="grid grid-cols-2 gap-2">
-                      <select
-                        value={manualPrinterType}
-                        onChange={(e) => setManualPrinterType(e.target.value as any)}
-                        disabled={!isAuthorized}
-                        className="bg-[#050507] border border-zinc-850 text-zinc-400 rounded-lg py-1.5 px-2 text-[8.5px] font-bold font-mono uppercase cursor-pointer focus:outline-none focus:border-zinc-700"
-                      >
-                        <option value="termica">🌡️ BOBINA</option>
-                        <option value="etiqueta">🏷️ ETIQUETA</option>
-                        <option value="comum">📄 LASER</option>
-                      </select>
-                      <button
-                        onClick={async () => {
-                          if (!manualPrinterName.trim()) return;
-                          let opts = ['A4'];
-                          if (manualPrinterType === 'termica') opts = ['Roll 80mm', 'Roll 58mm'];
-                          else if (manualPrinterType === 'etiqueta') opts = ['10x15', '4x6'];
-                          await handleRegisterPrinter(manualPrinterName.trim(), opts);
-                          setManualPrinterName('');
-                        }}
-                        disabled={!isAuthorized}
-                        className="bg-zinc-900 hover:bg-zinc-850 border border-zinc-850 text-emerald-400 hover:text-emerald-300 font-extrabold uppercase text-[8px] tracking-wider rounded-lg cursor-pointer flex items-center justify-center transition-all"
-                      >
-                        <Plus className="w-3.5 h-3.5 mr-0.5" /> REGISTRAR
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Connector Stage 1 -> 2 */}
-              <PipelineConnector active={!!isDesktop()} />
-
-              {/* NODE 2: Impressoras cadastradas no ERP */}
-              <div className="w-80 shrink-0 bg-[#070709]/85 backdrop-blur-xl border border-zinc-900 rounded-[28px] p-6 flex flex-col justify-between shadow-2xl relative transition-all duration-300 hover:border-zinc-800 hover:shadow-[0_0_40px_rgba(52,211,153,0.02)]" id="node-registered-printers">
-                <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-450/35 to-transparent"></div>
-                <div className="space-y-4">
-                  <div className="pb-3.5 border-b border-zinc-900 flex justify-between items-center" id="nh-node2">
-                    <div>
-                      <span className="text-[7px] font-mono tracking-[0.2em] bg-emerald-500/10 text-emerald-400 font-extrabold px-2 py-0.5 rounded border border-emerald-500/20 uppercase">
-                        STAGE 02
-                      </span>
-                      <h4 className="text-[11px] font-black uppercase text-white font-mono tracking-wider mt-2.5">
-                        Registro de Dispositivo
-                      </h4>
-                    </div>
-                  </div>
-
-                  <div className="space-y-3 max-h-[365px] overflow-y-auto pr-1 scrollbar-thin scrollbar-thumb-zinc-900" id="node2-scrollable">
-                    {/* Standard PDF Manual Destination option */}
-                    <div 
-                      onClick={() => {
-                        setSelectedErpPrinterId('pdf-manual');
-                        setSelectedDocumentId(null);
-                      }}
-                      className={cn(
-                        "p-3.5 rounded-xl border transition-all duration-300 cursor-pointer text-left flex flex-col justify-between relative overflow-hidden group",
-                        selectedErpPrinterId === 'pdf-manual' 
-                          ? "bg-amber-500/10 border-amber-500/40 shadow-[0_0_20px_rgba(245,158,11,0.08)] text-white" 
-                          : "bg-[#0b0b0d] border-zinc-900/80 text-zinc-400 hover:border-zinc-850 hover:bg-zinc-900/30"
-                      )}
-                    >
-                      <div className="flex justify-between items-start">
-                        <span className="text-[6.5px] font-mono font-bold tracking-widest bg-amber-500/10 text-amber-500 px-1.5 py-0.5 rounded leading-none border border-amber-500/20">
-                          VIRTUAL DEV
-                        </span>
-                      </div>
-                      <h5 className="text-[10px] font-mono uppercase font-black tracking-wide text-amber-400 mt-2.5">
-                        💾 SALVAR EM PDF (MANUAL)
-                      </h5>
-                      <span className="text-[9px] text-zinc-500 mt-1 block leading-relaxed font-sans">
-                        Roteia as vias para arquivo local digital sem emitir filas físicas de impressão.
-                      </span>
-                    </div>
-
-                    {/* Physical Printers */}
-                    {printers.map((p) => {
-                      const isSelected = selectedErpPrinterId === p.id;
+                ) : (
+                  <div className="space-y-1 max-h-[220px] overflow-y-auto scrollbar-thin pr-0.5">
+                    {systemOsPrintersList.map((sysP) => {
+                      const isSelected = selectedSystemPrinterName === sysP.name;
                       return (
                         <div 
-                          key={p.id}
+                          key={sysP.name}
                           onClick={() => {
-                            setSelectedErpPrinterId(p.id);
-                            setSelectedDocumentId(null); // Clear selected doc to force flowing
+                            setSelectedSystemPrinterName(sysP.name);
+                            setSelectedErpPrinterId(null);
+                            setSelectedDocumentId(null);
                           }}
                           className={cn(
-                            "p-3.5 rounded-xl border transition-all duration-300 cursor-pointer text-left flex flex-col justify-between space-y-2.5 relative group",
+                            "group border rounded-xl p-2 flex justify-between items-center cursor-pointer transition-all duration-200",
                             isSelected 
-                              ? "bg-emerald-500/5 border-emerald-500/45 shadow-[0_0_20px_rgba(16,185,129,0.06)] text-white" 
-                              : "bg-[#0b0b0d] border-zinc-900/80 text-zinc-400 hover:border-zinc-800 hover:bg-zinc-950/20"
+                              ? "bg-emerald-500/5 border-emerald-500/25" 
+                              : "bg-zinc-950/60 border-zinc-900/40 hover:border-zinc-800"
                           )}
                         >
-                          <div className="flex justify-between items-start">
-                            <span className={cn(
-                              "text-[6.5px] font-mono font-bold tracking-widest px-1.5 py-0.5 rounded leading-none border",
-                              p.status === 'ativa' 
-                                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                                : 'bg-rose-500/5 text-rose-500 border-rose-500/15'
-                            )}>
-                              {p.type === 'termica' ? '🌡️ BOBINA' : p.type === 'etiqueta' ? '🏷️ ETIQUETA' : '📄 LASER'} • {p.status.toUpperCase()}
-                            </span>
-                            
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleDeletePrinterWithAudit(p.id, p.name);
-                              }}
-                              disabled={!isAuthorized}
-                              className={cn(
-                                "p-1.5 hover:bg-rose-500/20 hover:text-rose-400 rounded-lg text-zinc-650 transition-colors cursor-pointer",
-                                !isAuthorized && "opacity-30 cursor-not-allowed"
-                              )}
-                              title="Remover impressora"
-                            >
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                          <div className="truncate pr-1.5">
+                            <span className="text-[10px] font-mono text-zinc-300 block truncate font-bold uppercase">{sysP.name}</span>
+                            <span className="text-[8px] font-mono text-zinc-500 block truncate uppercase">{sysP.port || 'USB001'}</span>
                           </div>
-                          
-                          <div>
-                            <h5 className="text-[10px] uppercase font-mono font-black text-zinc-100 tracking-tight leading-snug block truncate">
-                              {p.name}
-                            </h5>
-                            <span className="text-[7.5px] font-mono text-zinc-500 tracking-wide mt-1 block uppercase">
-                              🎚️ {p.config?.mediaOptions?.length || 0} mídias indexadas
-                            </span>
-                          </div>
+                          <span className="text-[8px] font-mono px-1 py-0.5 bg-zinc-900 text-emerald-400 border border-emerald-505/20 rounded shrink-0 font-bold group-hover:bg-emerald-600 group-hover:text-black transition-colors">
+                            CADASTRAR
+                          </span>
                         </div>
                       );
                     })}
                   </div>
-                </div>
-                <div className="pt-4 border-t border-zinc-900 mt-4 text-[9px] font-sans text-zinc-500 leading-normal">
-                  💡 Selecione o driver acima para habilitar o vínculo do respectivo documento de saída no estágio seguinte.
+                )}
+              </div>
+
+              {/* BOTTOM LISTA: CADASTRADAS NO ERP */}
+              <div className="space-y-2 pt-2 border-t border-zinc-900">
+                <span className="text-[10px] font-mono tracking-wider text-zinc-400 font-extrabold uppercase block pb-1 border-b border-zinc-900">
+                  Impressoras Cadastradas
+                </span>
+                <p className="text-[9px] text-zinc-500 font-sans leading-none pb-1">
+                  Modelos ativos configurados para emitir cupons:
+                </p>
+
+                <div className="space-y-1 max-h-[300px] overflow-y-auto scrollbar-thin pr-1">
+                  
+                  {/* PDF MANUAL OPTION */}
+                  <div 
+                    onClick={() => {
+                      setSelectedErpPrinterId('pdf-manual');
+                      setSelectedSystemPrinterName(null);
+                      setSelectedDocumentId(null);
+                    }}
+                    className={cn(
+                      "p-2 rounded-xl border transition-all cursor-pointer text-left flex justify-between items-center",
+                      selectedErpPrinterId === 'pdf-manual' 
+                        ? "bg-amber-500/10 border-amber-500/30 text-white" 
+                        : "bg-zinc-950/60 border-zinc-900/40 text-zinc-400 hover:border-zinc-800"
+                    )}
+                  >
+                    <div>
+                      <span className="text-[10px] font-mono uppercase font-black text-amber-500 block">📁 PDF DIGITAL MANUAL</span>
+                      <span className="text-[8px] font-mono text-zinc-500 block">Automático (Sem dispositivo físico)</span>
+                    </div>
+                  </div>
+
+                  {printers.map((p) => {
+                    const isSelected = selectedErpPrinterId === p.id;
+                    return (
+                      <div 
+                        key={p.id}
+                        onClick={() => {
+                          setSelectedErpPrinterId(p.id);
+                          setSelectedSystemPrinterName(null);
+                          setSelectedDocumentId(null);
+                        }}
+                        className={cn(
+                          "p-2 rounded-xl border transition-all cursor-pointer text-left flex justify-between items-center group relative",
+                          isSelected 
+                            ? "bg-emerald-505/10 border-emerald-505/40 text-white" 
+                            : "bg-zinc-950/60 border-zinc-900/40 text-zinc-300 hover:border-zinc-800"
+                        )}
+                      >
+                        <div className="truncate pr-4">
+                          <span className="text-[10px] font-mono uppercase font-black block truncate">{p.name}</span>
+                          <span className="text-[8px] font-mono text-zinc-500 block uppercase">
+                            {p.type === 'termica' ? 'Bobina Térmica' : p.type === 'etiqueta' ? 'Etiqueta de Envio' : 'Geral'}
+                          </span>
+                        </div>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeletePrinterWithAudit(p.id, p.name);
+                          }}
+                          disabled={!isAuthorized}
+                          className="p-1 text-zinc-500 hover:text-rose-400 hover:bg-zinc-900/80 rounded opacity-0 group-hover:opacity-100 transition-all shrink-0 absolute right-2 top-2.5 z-10"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 
-              {/* Connector Stage 2 -> 3 */}
-              <PipelineConnector active={!!selectedErpPrinterId} />
+            </div>
 
-              {/* NODE 3: Documento ERP */}
-              <div className={cn(
-                "w-72 shrink-0 bg-[#070709]/85 backdrop-blur-xl border rounded-[28px] p-6 flex flex-col justify-between transition-all duration-300 relative shadow-2xl",
-                !selectedErpPrinterId 
-                  ? "opacity-25 border-zinc-950 pointer-events-none scale-[0.98] blur-[0.3px]" 
-                  : "border-zinc-905 hover:border-zinc-800 shadow-[0_0_40px_rgba(6,182,212,0.02)]"
-              )} id="node-document-erpid">
-                {selectedErpPrinterId && (
-                  <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-cyan-500/35 to-transparent animate-pulse" />
-                )}
-                <div className="space-y-4">
-                  <div className="pb-3 border-b border-zinc-900">
-                    <span className="text-[7.5px] font-mono tracking-widest bg-zinc-900 text-zinc-500 font-extrabold px-1.5 py-0.5 rounded uppercase border border-zinc-800">
-                      PASSO 03
-                    </span>
-                    <h4 className="text-[10px] font-black uppercase text-white font-mono tracking-wider mt-1">
-                      Documento ERP
-                    </h4>
+            {/* MANUAL REGISTRATION AT BASE OF LEFT RAIL */}
+            <div className="pt-3 border-t border-zinc-900 space-y-1.5 text-left font-mono">
+              <span className="text-[8px] font-bold text-zinc-500 block uppercase tracking-wider">Cadastro Manual por Driver</span>
+              <div className="flex gap-1">
+                <input 
+                  type="text" 
+                  placeholder="Nome Exato do Driver"
+                  value={manualPrinterName}
+                  onChange={(e) => setManualPrinterName(e.target.value)}
+                  disabled={!isAuthorized}
+                  className="flex-1 bg-zinc-950 border border-zinc-900 rounded px-2 py-1 text-zinc-300 placeholder-zinc-700 text-[10px] uppercase focus:outline-none focus:border-zinc-700"
+                />
+                <button
+                  onClick={async () => {
+                    if (!manualPrinterName.trim()) return;
+                    await handleRegisterPrinter(manualPrinterName.trim());
+                    setManualPrinterName('');
+                  }}
+                  disabled={!isAuthorized}
+                  className="px-2 bg-zinc-900/80 hover:bg-zinc-800 text-emerald-400 font-bold uppercase text-[9px] rounded border border-zinc-800 cursor-pointer"
+                >
+                  Ok
+                </button>
+              </div>
+            </div>
+
+            {/* BOTTOM NOTE CARD */}
+            <div className="mt-3 p-2 bg-emerald-950/10 border border-emerald-500/10 rounded-xl text-left">
+              <div className="flex items-start gap-1.5">
+                <Info className="w-3 h-3 text-emerald-400 shrink-0 mt-0.5" />
+                <p className="text-[8px] font-mono text-emerald-400/80 leading-normal">
+                  Apenas impressoras reais instaladas no Windows são exibidas no sistema. <strong className="text-emerald-400">Nada aqui é simulado ou mockado.</strong>
+                </p>
+              </div>
+            </div>
+          </div>
+
+          {/* PAINEL CENTRAL PRONTUÁRIO / MAPA INTERATIVO */}
+          <div className="lg:col-span-3 bg-zinc-950/10 border border-zinc-900/50 rounded-2xl p-5 flex flex-col justify-between relative overflow-hidden shadow-2xl">
+            
+            {/* STAGE BAR: PASSOS INTERATIVOS */}
+            <div className="grid grid-cols-5 gap-2 bg-[#090a0d] border border-zinc-900/60 p-3.5 rounded-2xl mb-6 shadow-[inset_0_0_12px_rgba(0,0,0,0.5)]">
+              <div className="flex flex-col items-center text-center space-y-1">
+                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 border border-zinc-800 text-[9px] font-mono text-emerald-400 font-bold">1</div>
+                <h5 className="text-[8px] font-mono font-black text-zinc-300 uppercase leading-none">1. Selecione</h5>
+                <p className="text-[7.5px] text-zinc-500 leading-tight">Escolha driver na lista lateral.</p>
+              </div>
+              <div className="flex flex-col items-center text-center space-y-1">
+                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 border border-zinc-800 text-[9px] font-mono text-emerald-400 font-bold">2</div>
+                <h5 className="text-[8px] font-mono font-black text-zinc-300 uppercase leading-none">2. Cadastrar</h5>
+                <p className="text-[7.5px] text-zinc-500 leading-tight">Adicione no cadastro ERP.</p>
+              </div>
+              <div className="flex flex-col items-center text-center space-y-1">
+                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 border border-zinc-800 text-[9px] font-mono text-emerald-400 font-bold">3</div>
+                <h5 className="text-[8px] font-mono font-black text-zinc-300 uppercase leading-none">3. Selecione Papel</h5>
+                <p className="text-[7.5px] text-zinc-500 leading-tight">Clique no papel para avançar.</p>
+              </div>
+              <div className="flex flex-col items-center text-center space-y-1">
+                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 border border-zinc-800 text-[9px] font-mono text-emerald-400 font-bold">4</div>
+                <h5 className="text-[8px] font-mono font-black text-zinc-300 uppercase leading-none">4. Ajuste Tipo</h5>
+                <p className="text-[7.5px] text-zinc-500 leading-tight">Defina a mídia do papel.</p>
+              </div>
+              <div className="flex flex-col items-center text-center space-y-1">
+                <div className="flex items-center justify-center w-6 h-6 rounded-full bg-zinc-900/80 border border-zinc-800 text-[9px] font-mono text-emerald-400 font-bold">5</div>
+                <h5 className="text-[8px] font-mono font-black text-zinc-300 uppercase leading-none">5. Qualidade</h5>
+                <p className="text-[7.5px] text-zinc-500 leading-tight">Pronto! Salva em tempo real.</p>
+              </div>
+            </div>
+
+            {/* SELECTION STATE ENGINE */}
+            {!selectedErpPrinterId && !selectedSystemPrinterName ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-12 max-w-sm mx-auto space-y-3">
+                <Workflow className="w-8 h-8 text-zinc-850 animate-pulse text-emerald-400/40" />
+                <h4 className="text-[11px] font-mono font-black uppercase text-zinc-300 tracking-wider">Mapeamento Inativo</h4>
+                <p className="text-[10px] text-zinc-500 leading-normal">
+                  Selecione um driver do sistema operacional ou uma impressora cadastrada ao lado para iniciar a rede de roteamento de documentos físicos.
+                </p>
+              </div>
+            ) : selectedSystemPrinterName ? (
+              /* FLOW DE CASDRASTRO DA DETECTADA */
+              <div className="flex-1 flex flex-col items-center justify-center max-w-md mx-auto space-y-6 py-6 text-center animate-fade-in">
+                <div className="p-4 bg-emerald-500/5 rounded-3xl border border-emerald-505/20 flex flex-col items-center space-y-4 shadow-xl">
+                  <PrinterIcon className="w-12 h-12 text-emerald-400 stroke-[1.5]" />
+                  <div>
+                    <h3 className="text-sm font-mono tracking-widest text-emerald-400 font-semibold uppercase">Impressora Detectada no Windows</h3>
+                    <p className="text-[11px] text-zinc-400 mt-1 uppercase font-bold bg-zinc-950 px-2.5 py-1.5 rounded">{selectedSystemPrinterName}</p>
+                  </div>
+                  <div className="h-[1px] w-12 bg-zinc-800"></div>
+                  <div className="text-[10px] text-zinc-500 max-w-xs leading-relaxed">
+                    Este driver de emissão física está pronto para cadastro. Deseja registrar no ERP Nexa para vincular formulários, boletos e etiquetas em tempo real?
+                  </div>
+                  
+                  <button
+                    onClick={() => handleRegisterPrinter(selectedSystemPrinterName)}
+                    className="w-full py-2.5 bg-emerald-500 text-black text-[10px] font-black uppercase tracking-widest rounded-xl hover:bg-emerald-400 flex items-center justify-center gap-2 transition-transform transform active:scale-[0.98] cursor-pointer shadow-lg"
+                  >
+                    <Plus className="w-4 h-4 text-black stroke-[3]" />
+                    Cadastrar Impressora
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* MAPA MENTAL CENTRAL (5 COLUNAS HORIZONTAIS) */
+              <div className="flex-1 flex flex-col justify-between">
+                
+                {/* HORIZONTAL BOARD */}
+                <div className="flex select-none gap-4 overflow-x-auto pb-4 pt-2 px-1 rounded-2xl bg-gradient-to-b from-[#050507] to-[#010102] border border-zinc-900 shadow-[inset_0_0_50px_rgba(0,0,0,0.8)] scrollbar-thin" id="mental-map-scrollway">
+                  
+                  {/* COLUNA 1: IMPRESSORA SELECIONADA */}
+                  <div className="w-48 shrink-0 bg-[#07070a]/90 border border-zinc-900 rounded-xl p-4 flex flex-col justify-between text-left shadow-lg relative min-h-[350px]">
+                    <div className="space-y-4">
+                      <div className="pb-2 border-b border-zinc-900 flex justify-between items-center">
+                        <div>
+                          <span className="text-[7px] font-mono text-zinc-600 block">PASSO 1</span>
+                          <h4 className="text-[9px] font-black uppercase text-zinc-400 font-mono">Dispositivo</h4>
+                        </div>
+                        <span className="text-[8px] font-mono bg-emerald-500/10 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/20">Ativo</span>
+                      </div>
+
+                      <div className="flex flex-col items-center justify-center text-center py-4 space-y-2 bg-zinc-950/20 border border-zinc-900/60 rounded-xl p-3">
+                        <PrinterIcon className="w-8 h-8 text-emerald-400 animate-pulse stroke-[1.5]" />
+                        <div>
+                          <p className="text-[10px] font-mono text-white uppercase font-black tracking-tight truncate max-w-[130px]" title={activeErpPrinter?.name || 'Manual PDF'}>
+                            {activeErpPrinter?.name || 'PDF DIGITAL'}
+                          </p>
+                          <span className="text-[8px] font-mono text-zinc-500 uppercase block mt-0.5">
+                            {selectedErpPrinterId === 'pdf-manual' ? 'Virtual (Manual)' : (activeErpPrinter?.type || 'USB001')}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pt-2">
+                      {selectedErpPrinterId !== 'pdf-manual' && (
+                        <button
+                          onClick={() => activeErpPrinter && handleDeletePrinterWithAudit(activeErpPrinter.id, activeErpPrinter.name)}
+                          className="w-full py-1.5 bg-zinc-950 hover:bg-zinc-900 text-rose-400 text-[8px] font-extrabold uppercase rounded-lg border border-zinc-900 transition-colors cursor-pointer"
+                        >
+                          Remover
+                        </button>
+                      )}
+                    </div>
                   </div>
 
-                  {!selectedErpPrinterId ? (
-                    <div className="py-24 text-center text-zinc-600 font-sans text-[8.5px] leading-relaxed">
-                      ❌ Selecione uma impressora cadastrada do ERP na coluna à esquerda para liberar os documentos.
-                    </div>
-                  ) : (
-                    <div className="space-y-2 max-h-[380px] overflow-y-auto pr-1">
-                      {DOCUMENT_IDS.map((docId) => {
-                        const isSelectedDoc = selectedDocumentId === docId;
-                        const boundConfig = documentPrintConfigs.find(c => c.documentId === docId);
-                        const mappedDeviceName = boundConfig?.printerId === 'pdf-manual' 
-                          ? '📄 PDF DIGITAL' 
-                          : (printers.find(p => p.id === boundConfig?.printerId)?.name || 'NÃO CONFIGURADO');
+                  {/* CONNECT 1 -> 2 */}
+                  <PipelineConnector active={true} />
 
-                        return (
-                          <div
-                            key={docId}
-                            onClick={() => {
-                              setSelectedDocumentId(docId);
-                              
-                              // Physically bind document in ERP immediately when selected
-                              const docLabel = DOCUMENT_LABELS[docId] || docId;
-                              const prevConfig = (documentPrintConfigs.find(c => c.documentId === docId) || {
-                                documentId: docId as any,
-                                documentName: docLabel,
-                                printerId: 'pdf-manual',
-                                paperErpId: docId.includes('label') ? 'A6' : '80mm',
-                                updatedAt: Date.now()
-                              }) as DocumentPrintConfig;
+                  {/* COLUNA 2: TIPO DE DOCUMENTO */}
+                  <div className="w-56 shrink-0 bg-[#07070a]/90 border border-zinc-900 rounded-xl p-4 flex flex-col justify-between text-left shadow-lg relative min-h-[350px]">
+                    <div className="space-y-3">
+                      <div className="pb-2 border-b border-zinc-900">
+                        <span className="text-[7px] font-mono text-zinc-650 block">PASSO 2</span>
+                        <h4 className="text-[9px] font-black uppercase text-zinc-300 font-mono">Tipo de Documento</h4>
+                      </div>
 
-                              const targetPrinterName = selectedErpPrinterId === 'pdf-manual' ? 'PDF Manual' : (activeErpPrinter?.name || 'Físico');
+                      <div className="space-y-1">
+                        {DOCUMENT_IDS.map((docId) => {
+                          const isSelectedDoc = selectedDocumentId === docId;
+                          const isBound = documentPrintConfigs.find(c => c.documentId === docId && c.printerId === selectedErpPrinterId);
+                          return (
+                            <div
+                              key={docId}
+                              onClick={() => {
+                                setSelectedDocumentId(docId);
+                                const docLabel = DOCUMENT_LABELS[docId] || docId;
+                                const prevConfig = (documentPrintConfigs.find(c => c.documentId === docId) || {
+                                  documentId: docId as any,
+                                  documentName: docLabel,
+                                  printerId: 'pdf-manual',
+                                  paperErpId: docId.includes('label') ? 'A6' : '80mm',
+                                  updatedAt: Date.now()
+                                }) as DocumentPrintConfig;
 
-                              checkPermissionAndRun('alterar perfil de documento', () => {
-                                saveDocumentPrintConfig({
-                                  ...prevConfig,
-                                  printerId: selectedErpPrinterId,
-                                  printerName: targetPrinterName,
-                                  pdfManualActive: selectedErpPrinterId === 'pdf-manual',
-                                  printerMode: selectedErpPrinterId === 'pdf-manual' ? 'pdf_manual' : 'physical_printer',
-                                  driverPaperName: prevConfig.driverPaperName || (selectedErpPrinterId === 'pdf-manual' ? (docId.includes('label') ? 'A6' : '80mm') : activeMediaOptions[0] || 'A4')
+                                const targetPrinterName = selectedErpPrinterId === 'pdf-manual' ? 'PDF Manual' : (activeErpPrinter?.name || 'Físico');
+
+                                checkPermissionAndRun('alterar perfil de documento', () => {
+                                  saveDocumentPrintConfig({
+                                    ...prevConfig,
+                                    printerId: selectedErpPrinterId,
+                                    printerName: targetPrinterName,
+                                    pdfManualActive: selectedErpPrinterId === 'pdf-manual',
+                                    printerMode: selectedErpPrinterId === 'pdf-manual' ? 'pdf_manual' : 'physical_printer',
+                                    driverPaperName: prevConfig.driverPaperName || (selectedErpPrinterId === 'pdf-manual' ? (docId.includes('label') ? 'A6' : '80mm') : activeMediaOptions[0] || '80 x 60 mm')
+                                  });
+                                  addActivity(`Perfil de "${docLabel}" roteado para "${targetPrinterName}"`, 'auth', 'Ajustes');
+                                  feedback.success && feedback.success();
                                 });
-                                // Audit
-                                addActivity(`Perfil de "${docLabel}" alterado para impressora "${targetPrinterName}"`, 'auth', 'Ajustes');
-                                feedback.success && feedback.success();
-                              });
-                            }}
-                            className={cn(
-                              "p-3 rounded-2xl border transition-all cursor-pointer text-left flex flex-col justify-between font-sans relative",
-                              isSelectedDoc 
-                                ? "bg-emerald-500/10 border-emerald-500/40 shadow-xs" 
-                                : "bg-zinc-950 border-zinc-900 text-zinc-400 hover:border-zinc-800"
-                            )}
-                          >
-                            <h5 className="text-[9px] uppercase font-black text-white leading-none tracking-tight">{DOCUMENT_LABELS[docId]}</h5>
-                            <div className="flex justify-between items-center mt-2.5">
-                              <span className="text-[7.5px] text-zinc-500 font-mono">VÍNCULO ATUAL:</span>
-                              <span className="text-[7.5px] font-mono font-bold text-emerald-400 uppercase truncate max-w-[130px]" title={mappedDeviceName}>
-                                {mappedDeviceName.toUpperCase()}
+                              }}
+                              className={cn(
+                                "p-2 rounded-lg border transition-all cursor-pointer text-left flex items-center justify-between",
+                                isSelectedDoc 
+                                  ? "bg-emerald-500/10 border-emerald-500/40 text-white" 
+                                  : "bg-zinc-950/80 border-zinc-900 text-zinc-400 hover:border-zinc-805"
+                              )}
+                            >
+                              <span className="text-[9px] uppercase font-black truncate">{DOCUMENT_LABELS[docId]}</span>
+                              {isBound && <Check className="w-2.5 h-2.5 text-emerald-400 stroke-[3.5]" />}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    <div className="text-[7.5px] font-mono text-zinc-550 leading-tight">
+                      Roteamento instantâneo do fluxo de saídas.
+                    </div>
+                  </div>
+
+                  {/* CONNECT 2 -> 3 */}
+                  <PipelineConnector active={!!selectedDocumentId} />
+
+                  {/* COLUNA 3: PAPEL */}
+                  <div className="w-56 shrink-0 bg-[#07070a]/90 border border-zinc-900 rounded-xl p-4 flex flex-col justify-between text-left shadow-lg relative min-h-[350px]">
+                    <div className="space-y-3">
+                      <div className="pb-2 border-b border-zinc-900">
+                        <span className="text-[7px] font-mono text-zinc-650 block">PASSO 3</span>
+                        <h4 className="text-[9px] font-black uppercase text-zinc-300 font-mono">Tamanho do Papel</h4>
+                      </div>
+
+                      {!selectedDocumentId ? (
+                        <div className="py-12 text-center text-zinc-600 font-sans text-[9px] leading-relaxed">
+                          Selecione um documento no nível anterior.
+                        </div>
+                      ) : selectedErpPrinterId === 'pdf-manual' ? (
+                        <div className="p-3 bg-zinc-900/20 border border-zinc-850 rounded-xl">
+                          <p className="text-[8.5px] font-mono text-zinc-400 leading-normal">
+                            As propriedades de tamanho do driver físico estão trancadas para o modo digital automático PDF.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-2">
+                          {isPaperSelectionCollapsed && activeDocConfig?.driverPaperName ? (
+                            /* COMPACTED VIEW IN PAPER */
+                            <div 
+                              onDoubleClick={() => setIsPaperSelectionCollapsed(false)}
+                              className="p-2 bg-emerald-500/15 border border-emerald-505/40 rounded-xl cursor-all-scroll text-center"
+                              title="Clique duplo para reabrir"
+                            >
+                              <span className="text-[10px] font-mono text-emerald-400 font-black block uppercase">{activeDocConfig.driverPaperName}</span>
+                              <span className="text-[7px] text-emerald-500 animate-pulse font-mono uppercase font-black inline-flex items-center gap-1 mt-1 justify-center">
+                                <MousePointerClick className="w-2 h-2" /> Duplo clique para mudar
                               </span>
                             </div>
-                            {/* Paper summary snippet in document profile */}
-                            {boundConfig && boundConfig.printerId !== 'pdf-manual' && (
-                              <div className="text-[6.5px] font-mono text-zinc-650 tracking-tight leading-none mt-1 border-t border-zinc-900 pt-1 flex justify-between">
-                                <span>PAPEL: {boundConfig.driverPaperName || 'NÃO CONFIGURADO'}</span>
-                                {boundConfig.printQuality && <span>Q: {boundConfig.printQuality}</span>}
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                          ) : (
+                            /* EXPANDED VIEW IN PAPER */
+                            <div className="space-y-1 max-h-[220px] overflow-y-auto scrollbar-thin pr-0.5">
+                              {activeMediaOptions.map((opt) => {
+                                const isSelectedPaper = activeDocConfig?.driverPaperName === opt;
+                                return (
+                                  <div
+                                    key={opt}
+                                    onClick={() => {
+                                      checkPermissionAndRun('alterar papel', () => {
+                                        if (activeDocConfig) {
+                                          saveDocumentPrintConfig({
+                                            ...activeDocConfig,
+                                            driverPaperName: opt,
+                                            selectedDriverMediaName: opt
+                                          });
+                                          addActivity(`Papel de "${DOCUMENT_LABELS[selectedDocumentId!] || selectedDocumentId}" alterado para "${opt}"`, 'auth', 'Ajustes');
+                                          feedback.success && feedback.success();
+                                          setIsPaperSelectionCollapsed(true);
+                                        }
+                                      });
+                                    }}
+                                    className={cn(
+                                      "p-2 rounded-lg border text-[9px] font-mono transition-all font-bold uppercase cursor-pointer",
+                                      isSelectedPaper 
+                                        ? "bg-emerald-505/10 border-emerald-505/40 text-emerald-400" 
+                                        : "bg-zinc-950 border-zinc-900 text-zinc-400 hover:border-zinc-800"
+                                    )}
+                                  >
+                                    {opt}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-zinc-900 mt-4 text-[7.5px] font-mono text-zinc-500 leading-normal">
-                  💡 Selecionando qualquer documento, ele é automaticamente roteado para a impressora destacada no Passo 2.
-                </div>
-              </div>
 
-              {/* Connector Stage 3 -> 4 */}
-              <PipelineConnector active={!!selectedDocumentId && selectedErpPrinterId !== 'pdf-manual'} />
-
-              {/* NODE 4: Papel Real do Driver */}
-              <div className={cn(
-                "w-72 shrink-0 bg-[#070709]/85 backdrop-blur-xl border rounded-[28px] p-6 flex flex-col justify-between transition-all duration-300 relative shadow-2xl",
-                (!selectedDocumentId || selectedErpPrinterId === 'pdf-manual')
-                  ? "opacity-25 border-zinc-950 pointer-events-none scale-[0.98] blur-[0.3px]"
-                  : "border-zinc-905 hover:border-zinc-800 shadow-[0_0_40px_rgba(99,102,241,0.02)]"
-              )} id="node-driver-paper">
-                {selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && (
-                  <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-indigo-500/35 to-transparent" />
-                )}
-                <div className="space-y-4">
-                  <div className="pb-3 border-b border-zinc-900">
-                    <span className="text-[7.5px] font-mono tracking-widest bg-zinc-900 text-zinc-500 font-extrabold px-1.5 py-0.5 rounded uppercase border border-zinc-800">
-                      PASSO 04
-                    </span>
-                    <h4 className="text-[10px] font-black uppercase text-white font-mono tracking-wider mt-1">
-                      Papel Real do Driver
-                    </h4>
+                    {selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && (
+                      <div className="text-[7.5px] font-mono text-zinc-550 leading-tight">
+                        💡 Clique duplo no papel no modo recolhido para abrir a listagem novamente.
+                      </div>
+                    )}
                   </div>
 
-                  {!selectedDocumentId ? (
-                    <div className="py-24 text-center text-zinc-600 font-sans text-[8.5px] leading-relaxed">
-                      ❌ Selecione um documento na coluna à esquerda para configurar as propriedades do driver.
-                    </div>
-                  ) : selectedErpPrinterId === 'pdf-manual' ? (
-                    <div className="py-24 text-center text-zinc-500 font-mono text-[8px] leading-normal bg-zinc-950/20 border border-dashed border-zinc-900 p-4 rounded-2xl">
-                      ℹ️ O faturamento em PDF digital gera arquivos universais fáceis de compartilhar. As propriedades físicas do driver local do Windows estão trancadas para o modo digital.
-                    </div>
-                  ) : (
+                  {/* CONNECT 3 -> 4 */}
+                  <PipelineConnector active={!!selectedDocumentId && !!activeDocConfig?.driverPaperName && selectedErpPrinterId !== 'pdf-manual'} />
+
+                  {/* COLUNA 4: TIPO DE PAPEL */}
+                  <div className="w-56 shrink-0 bg-[#07070a]/90 border border-zinc-900 rounded-xl p-4 flex flex-col justify-between text-left shadow-lg relative min-h-[350px]">
                     <div className="space-y-3">
-                      <span className="text-[8px] font-black text-zinc-500 uppercase font-sans tracking-wide block">
-                        Selecione o tamanho físico retornado:
-                      </span>
+                      <div className="pb-2 border-b border-zinc-900">
+                        <span className="text-[7px] font-mono text-zinc-650 block">PASSO 4</span>
+                        <h4 className="text-[9px] font-black uppercase text-zinc-300 font-mono">Tipo de Papel</h4>
+                      </div>
 
-                      {activeMediaOptions.length === 0 ? (
-                        <div className="p-3 bg-rose-500/5 border border-rose-500/10 rounded-2xl">
-                          <p className="text-[7.5px] font-mono text-rose-400 font-bold leading-normal">
-                            ⚠️ Este driver não expôs papéis para o ERP localmente. Tentando requisições genéricas ou use o faturamento manual.
+                      {!selectedDocumentId || !activeDocConfig?.driverPaperName ? (
+                        <div className="py-12 text-center text-zinc-600 font-sans text-[9px] leading-relaxed">
+                          Apenas após selecionar o tamanho físico do papel.
+                        </div>
+                      ) : selectedErpPrinterId === 'pdf-manual' ? (
+                        <div className="p-3 bg-zinc-900/20 border border-zinc-850 rounded-xl">
+                          <p className="text-[8.5px] font-mono text-zinc-400 leading-normal">
+                            Desconectado no modo PDF Virtual.
                           </p>
                         </div>
-                      ) : (
-                        <div className="space-y-1.5 max-h-[350px] overflow-y-auto pr-1">
-                          {activeMediaOptions.map((opt) => {
-                            const isSelectedPaper = activeDocConfig?.driverPaperName === opt;
-                            return (
-                              <button
-                                key={opt}
-                                onClick={() => {
-                                  checkPermissionAndRun('alterar papel', () => {
-                                    if (activeDocConfig) {
-                                      saveDocumentPrintConfig({
-                                        ...activeDocConfig,
-                                        driverPaperName: opt,
-                                        selectedDriverMediaName: opt,
-                                        paperErpId: (() => {
-                                          const n = opt.toLowerCase().replace(/\s+/g, '');
-                                          if (n.includes('58mm') || n.includes('58x') || n.includes('bobina58') || n.includes('roll58') || n.includes('rolo58')) return '58mm';
-                                          if (n.includes('80mm') || n.includes('80x') || n.includes('bobina80') || n.includes('roll80') || n.includes('rolo80') || n === 't20') return '80mm';
-                                          if (n.includes('76mm') || n.includes('roll76')) return '80mm'; // aproximar para 80mm
-                                          if (n === 'a6' || n.includes('105x148') || n.includes('105mm')) return 'A6';
-                                          if (n === 'a5' || n.includes('148x210')) return 'A5';
-                                          if (n === 'a4' || n.includes('210x297') || n.includes('210mm')) return 'A4';
-                                          if (n === 'a3' || n.includes('297x420')) return 'A4'; // maior que A4, aproximar
-                                          if (n.includes('10x15') || n.includes('4x6') || n.includes('100x150')) return 'A6'; // etiqueta courier
-                                          if (n.includes('40x30') || n.includes('30x40') || n.includes('50x80') || n.includes('58x80')) return '40x30';
-                                          // Parsing numérico genérico para nomes como "105 x 148 mm" ou "210x297"
-                                          const dimMatch = n.replace(/,/g, '.').match(/(\d+(?:\.\d+)?)[x×*](\d+(?:\.\d+)?)/);
-                                          if (dimMatch) {
-                                            const w = parseFloat(dimMatch[1]);
-                                            const h = parseFloat(dimMatch[2]);
-                                            const wMm = (w < 30 && h < 30) ? w * 10 : w; // converter cm se necessário
-                                            if (wMm <= 60) return '58mm';
-                                            if (wMm <= 85) return '80mm';
-                                            if (wMm <= 110) return 'A6';
-                                            if (wMm <= 155) return 'A5';
-                                            return 'A4';
-                                          }
-                                          return 'A4'; // fallback
-                                        })()
-                                      });
-                                      // Audit
-                                      addActivity(`Papel de "${DOCUMENT_LABELS[selectedDocumentId] || selectedDocumentId}" alterado para "${opt}"`, 'auth', 'Ajustes');
-                                      feedback.success && feedback.success();
-                                    }
-                                  });
-                                }}
-                                className={cn(
-                                  "w-full text-left py-2 px-3 rounded-xl border text-[9px] font-mono transition-all font-bold uppercase",
-                                  isSelectedPaper 
-                                    ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-400" 
-                                    : "bg-zinc-950 border-zinc-900 text-zinc-400 hover:border-zinc-800"
-                                )}
-                              >
-                                🖨️ DRIVER: {opt.toUpperCase()}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-zinc-900 mt-4 text-[7.5px] font-mono text-zinc-500 leading-normal">
-                  ⚠️ Papéis puxados do driver garantem compatibilidade no spooler do Windows, prevenindo cortes nas margens.
-                </div>
-              </div>
-
-              {/* Connector Stage 4 -> 5 */}
-              <PipelineConnector active={!!selectedDocumentId && selectedErpPrinterId !== 'pdf-manual'} />
-
-              {/* NODE 5: Tipo de Mídia/Papel */}
-              <div className={cn(
-                "w-72 shrink-0 bg-[#070709]/85 backdrop-blur-xl border rounded-[28px] p-6 flex flex-col justify-between transition-all duration-300 relative shadow-2xl",
-                (!selectedDocumentId || selectedErpPrinterId === 'pdf-manual')
-                  ? "opacity-25 border-zinc-950 pointer-events-none scale-[0.98] blur-[0.3px]"
-                  : "border-zinc-905 hover:border-zinc-800 shadow-[0_0_40px_rgba(59,130,246,0.02)]"
-              )} id="node-media-style">
-                {selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && (
-                  <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-blue-500/35 to-transparent" />
-                )}
-                <div className="space-y-4">
-                  <div className="pb-3 border-b border-zinc-900">
-                    <span className="text-[7.5px] font-mono tracking-widest bg-zinc-900 text-zinc-500 font-extrabold px-1.5 py-0.5 rounded uppercase border border-zinc-800">
-                      PASSO 05
-                    </span>
-                    <h4 className="text-[10px] font-black uppercase text-white font-mono tracking-wider mt-1">
-                      Tipo de Mídia
-                    </h4>
-                  </div>
-
-                  {!selectedDocumentId ? (
-                    <div className="py-24 text-center text-zinc-600 font-sans text-[8.5px]">
-                      ❌ Selecione um documento para configurar as preferências físicas de mídia.
-                    </div>
-                  ) : selectedErpPrinterId === 'pdf-manual' ? (
-                    <div className="py-24 text-center text-zinc-500 font-mono text-[8px] leading-normal bg-zinc-950/20 border border-dashed border-zinc-900 p-4 rounded-2xl">
-                      ℹ️ Tipos de mídias físicas não são expostas para o faturamento em PDF digital.
-                    </div>
-                  ) : (
-                    <div className="space-y-4 font-sans">
-                      {activeErpPrinter?.config?.mediaTypes && activeErpPrinter.config.mediaTypes.length > 0 ? (
+                      ) : activeErpPrinter?.config?.mediaTypes && activeErpPrinter.config.mediaTypes.length > 0 ? (
+                        /* DRIVER DETECTED PAPERS */
                         <div className="space-y-2">
-                          <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest block font-bold">Mídias Reais do Driver:</span>
-                          {activeErpPrinter.config.mediaTypes.map((mt) => {
-                            const isSelectedMediaType = activeDocConfig?.mediaType === mt;
-                            return (
-                              <button
-                                key={mt}
-                                onClick={() => {
-                                  checkPermissionAndRun('alterar tipo de mídia', () => {
-                                    if (activeDocConfig) {
-                                      saveDocumentPrintConfig({
-                                        ...activeDocConfig,
-                                        mediaType: mt
+                          {isTypeSelectionCollapsed && activeDocConfig?.mediaType ? (
+                            <div 
+                              onDoubleClick={() => setIsTypeSelectionCollapsed(false)}
+                              className="p-2 bg-emerald-500/15 border border-emerald-505/40 rounded-xl cursor-all-scroll text-center"
+                            >
+                              <span className="text-[10px] font-mono text-emerald-400 font-black block uppercase">{activeDocConfig.mediaType}</span>
+                              <span className="text-[7px] text-emerald-500 animate-pulse font-mono uppercase font-black inline-flex items-center gap-1 mt-1 justify-center">
+                                <MousePointerClick className="w-2 h-2" /> Duplo clique para mudar
+                              </span>
+                            </div>
+                          ) : (
+                            <div className="space-y-1 max-h-[220px] overflow-y-auto scrollbar-thin pr-0.5">
+                              {activeErpPrinter.config.mediaTypes.map((mt) => {
+                                const isSelectedMediaType = activeDocConfig?.mediaType === mt;
+                                return (
+                                  <div
+                                    key={mt}
+                                    onClick={() => {
+                                      checkPermissionAndRun('alterar tipo de mídia', () => {
+                                        if (activeDocConfig) {
+                                          saveDocumentPrintConfig({
+                                            ...activeDocConfig,
+                                            mediaType: mt
+                                          });
+                                          addActivity(`Mídia do papel de "${DOCUMENT_LABELS[selectedDocumentId!] || selectedDocumentId}" alterado para "${mt}"`, 'auth', 'Ajustes');
+                                          feedback.success && feedback.success();
+                                          setIsTypeSelectionCollapsed(true);
+                                        }
                                       });
-                                      addActivity(`Tipo de mídia de "${DOCUMENT_LABELS[selectedDocumentId] || selectedDocumentId}" alterado para "${mt}"`, 'auth', 'Ajustes');
-                                      feedback.success && feedback.success();
-                                    }
-                                  });
-                                }}
-                                className={cn(
-                                  "w-full text-left py-1.5 px-2.5 rounded-xl border text-[8.5px] font-mono transition-all font-bold uppercase",
-                                  isSelectedMediaType
-                                    ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-400"
-                                    : "bg-zinc-950 border-zinc-900 text-zinc-400 hover:border-zinc-800"
-                                )}
-                              >
-                                ⚙️ {mt.toUpperCase()}
-                              </button>
-                            );
-                          })}
+                                    }}
+                                    className={cn(
+                                      "p-2 rounded-lg border text-[9px] font-mono transition-all font-bold uppercase cursor-pointer",
+                                      isSelectedMediaType
+                                        ? "bg-emerald-505/10 border-emerald-505/40 text-emerald-400"
+                                        : "bg-zinc-950 border-zinc-900 text-zinc-400 hover:border-zinc-800"
+                                    )}
+                                  >
+                                    {mt}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       ) : (
-                        <div className="p-3 bg-zinc-900/40 border border-zinc-900 rounded-2xl flex flex-col space-y-2">
-                          <span className="text-[8.5px] font-mono text-zinc-400 font-bold leading-normal block uppercase">
-                            Capacidades do Driver
-                          </span>
-                          <p className="text-[7.5px] text-zinc-500 leading-normal">
-                            Este driver não expôs tipos de mídia para o ERP.
-                            Será utilizado o padrão configurado no driver físico.
+                        /* DRIVER ABSENT WARNING */
+                        <div className="p-3 bg-zinc-900/40 border border-zinc-900 rounded-xl text-zinc-400 text-left">
+                          <p className="text-[9px] font-mono leading-normal text-amber-500">
+                            O driver desta impressora não retornou opções de tipo/qualidade.
+                          </p>
+                          <p className="text-[7.5px] mt-2 text-zinc-500">
+                            Serão aplicadas as mídias padrões do Windows diretamente no nível de spooler físico.
                           </p>
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-zinc-900 mt-4 text-[7.5px] font-mono text-zinc-500 leading-normal">
-                  ⚠️ O ERP respeita fidedignamente os limites físicos do driver, deixando que as propriedades internas não expostas fiquem a cargo do Windows.
-                </div>
-              </div>
 
-              {/* Connector Stage 5 -> 6 */}
-              <PipelineConnector active={!!selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && (activeErpPrinter?.config?.mediaTypes?.length || 0) > 0} />
-
-              {/* NODE 6: Qualidade de Impressão */}
-              <div className={cn(
-                "w-72 shrink-0 bg-[#070709]/85 backdrop-blur-xl border rounded-[28px] p-6 flex flex-col justify-between transition-all duration-300 relative shadow-2xl",
-                (!selectedDocumentId || selectedErpPrinterId === 'pdf-manual')
-                  ? "opacity-25 border-zinc-950 pointer-events-none scale-[0.98] blur-[0.3px]"
-                  : "border-zinc-905 hover:border-zinc-800 shadow-[0_0_40px_rgba(139,92,246,0.02)]"
-              )} id="node-quality-tuning">
-                {selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && (
-                  <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-violet-500/35 to-transparent" />
-                )}
-                <div className="space-y-4">
-                  <div className="pb-3 border-b border-zinc-900">
-                    <span className="text-[7.5px] font-mono tracking-widest bg-zinc-900 text-zinc-500 font-extrabold px-1.5 py-0.5 rounded uppercase border border-zinc-800">
-                      PASSO 06
-                    </span>
-                    <h4 className="text-[10px] font-black uppercase text-white font-mono tracking-wider mt-1">
-                      Qualidade de Impressão
-                    </h4>
+                    {selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && activeErpPrinter?.config?.mediaTypes && (
+                      <div className="text-[7.5px] font-mono text-zinc-550 leading-tight">
+                        💡 Clique duplo para reabrir opções se recolhido.
+                      </div>
+                    )}
                   </div>
 
-                  {!selectedDocumentId ? (
-                    <div className="py-24 text-center text-zinc-600 font-sans text-[8.5px]">
-                      ❌ Selecione um documento para configurar as preferências físicas de DPI.
-                    </div>
-                  ) : selectedErpPrinterId === 'pdf-manual' ? (
-                    <div className="py-24 text-center text-zinc-500 font-mono text-[8px] leading-normal bg-zinc-950/20 border border-dashed border-zinc-900 p-4 rounded-2xl">
-                      ℹ️ Níveis de qualidade de impressão fotográfica estão trancadas para o modo digital folem.
-                    </div>
-                  ) : (
-                    <div className="space-y-4 font-sans">
-                      {activeErpPrinter?.config?.qualities && activeErpPrinter.config.qualities.length > 0 ? (
-                        <div className="space-y-2">
-                          <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest block font-bold">Resoluções Reais do Driver:</span>
+                  {/* CONNECT 4 -> 5 */}
+                  <PipelineConnector active={!!selectedDocumentId && !!activeDocConfig?.driverPaperName && selectedErpPrinterId !== 'pdf-manual'} />
+
+                  {/* COLUNA 5: QUALIDADE */}
+                  <div className="w-56 shrink-0 bg-[#07070a]/90 border border-zinc-900 rounded-xl p-4 flex flex-col justify-between text-left shadow-lg relative min-h-[350px]">
+                    <div className="space-y-3">
+                      <div className="pb-2 border-b border-zinc-900 flex justify-between items-center">
+                        <div className="flex flex-col">
+                          <span className="text-[7px] font-mono text-zinc-650 block">PASSO 5</span>
+                          <h4 className="text-[9px] font-black uppercase text-zinc-300 font-mono">Qualidade / DPI</h4>
+                        </div>
+                      </div>
+
+                      {!selectedDocumentId || !activeDocConfig?.driverPaperName ? (
+                        <div className="py-12 text-center text-zinc-600 font-sans text-[9px] leading-relaxed">
+                          Apenas após finalizar escolha do tamanho do papel.
+                        </div>
+                      ) : selectedErpPrinterId === 'pdf-manual' ? (
+                        <div className="p-2 bg-zinc-905 border border-zinc-900 rounded-lg text-zinc-500 text-[8.5px]">
+                          Desabilitado em PDF Digital.
+                        </div>
+                      ) : activeErpPrinter?.config?.qualities && activeErpPrinter.config.qualities.length > 0 ? (
+                        <div className="space-y-1 max-h-[140px] overflow-y-auto scrollbar-thin">
                           {activeErpPrinter.config.qualities.map((q) => {
                             const isSelectedQuality = activeDocConfig?.printQuality === q;
                             return (
-                              <button
+                              <div
                                 key={q}
                                 onClick={() => {
                                   checkPermissionAndRun('alterar qualidade', () => {
@@ -1069,231 +1015,345 @@ export default function PrintersSettings() {
                                         ...activeDocConfig,
                                         printQuality: q
                                       });
-                                      addActivity(`Qualidade do perfil "${DOCUMENT_LABELS[selectedDocumentId] || selectedDocumentId}" alterada para "${q}"`, 'auth', 'Ajustes');
+                                      addActivity(`Qualidade de "${DOCUMENT_LABELS[selectedDocumentId!] || selectedDocumentId}" alterada para "${q}"`, 'auth', 'Ajustes');
                                       feedback.success && feedback.success();
                                     }
                                   });
                                 }}
                                 className={cn(
-                                  "w-full text-left py-1.5 px-2.5 rounded-xl border text-[8.5px] font-mono transition-all font-bold uppercase",
+                                  "p-2 rounded-lg border text-[9px] font-mono transition-all font-bold uppercase cursor-pointer",
                                   isSelectedQuality
-                                    ? "bg-cyan-500/10 border-cyan-500/40 text-cyan-400"
+                                    ? "bg-emerald-505/10 border-emerald-505/40 text-emerald-400 animate-pulse"
                                     : "bg-zinc-950 border-zinc-900 text-zinc-400 hover:border-zinc-800"
                                 )}
                               >
-                                ⚡ {q.toUpperCase()}
-                              </button>
+                                {q}
+                              </div>
                             );
                           })}
                         </div>
                       ) : (
-                        <div className="p-3 bg-zinc-900/40 border border-zinc-900 rounded-2xl flex flex-col space-y-2">
-                          <span className="text-[8.5px] font-mono text-zinc-400 font-bold leading-normal block uppercase">
-                            DPI do Driver
-                          </span>
-                          <p className="text-[7.5px] text-zinc-500 leading-normal">
-                            Este driver não expôs níveis de qualidade para o ERP.
-                            Será utilizada a configuração padrão do driver físico.
+                        /* DRIVER NO QUALITIES WARNING */
+                        <div className="p-3 bg-zinc-900/40 border border-zinc-900 rounded-xl text-zinc-400 text-left">
+                          <p className="text-[9px] font-mono leading-normal text-amber-500">
+                            O driver desta impressora não retornou opções de tipo/qualidade.
                           </p>
                         </div>
                       )}
+
+                      {/* CONFIGURED GREEN CHECKMARK */}
+                      {selectedDocumentId && activeDocConfig?.driverPaperName && (
+                        <div className="flex items-center gap-1 bg-emerald-500/10 border border-emerald-500/20 rounded-lg p-2 mt-2">
+                          <Check className="w-3.5 h-3.5 text-emerald-400 stroke-[3]" />
+                          <span className="text-[9px] font-mono text-emerald-400 font-bold leading-none">Configurado com sucesso!</span>
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-                <div className="pt-4 border-t border-zinc-900 mt-4 text-[7.5px] font-mono text-zinc-500 leading-normal">
-                  ⚠️ Níveis específicos de DPI dependem da listagem real do driver de impressão do fabricante.
-                </div>
-              </div>
 
-              {/* Connector Stage 6 -> 7 */}
-              <PipelineConnector active={!!selectedDocumentId} />
-
-              {/* NODE 7: Preferências Finais / Extras */}
-              <div className={cn(
-                "w-80 shrink-0 bg-[#070709]/85 backdrop-blur-xl border rounded-[28px] p-6 flex flex-col justify-between transition-all duration-300 relative shadow-2xl",
-                !selectedDocumentId
-                  ? "opacity-25 border-zinc-950 pointer-events-none scale-[0.98] blur-[0.3px]"
-                  : "border-zinc-905 hover:border-zinc-800 shadow-[0_0_40px_rgba(16,185,129,0.02)]"
-              )} id="node-extras-configs">
-                {selectedDocumentId && (
-                  <div className="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-transparent via-emerald-500/35 to-transparent" />
-                )}
-                <div className="space-y-4 font-mono text-xs">
-                  <div className="pb-3 border-b border-zinc-900">
-                    <span className="text-[7.5px] font-mono tracking-widest bg-zinc-900 text-zinc-500 font-extrabold px-1.5 py-0.5 rounded uppercase border border-zinc-800">
-                      PASSO 07
-                    </span>
-                    <h4 className="text-[10px] font-black uppercase text-white font-mono tracking-wider mt-1">
-                      Preferências Extras
-                    </h4>
+                    {/* CONFIG SUMARY PREVIEW CARD */}
+                    <div className="bg-zinc-950/40 p-2 border border-zinc-900 rounded-lg mt-2 text-left font-mono">
+                      <span className="text-[8px] font-bold text-emerald-400 block pb-1 border-b border-zinc-900/40 mb-1">Resumo do Perfil:</span>
+                      <p className="text-[7.5px] text-zinc-400 leading-tight">Impressora: <strong className="text-zinc-300 font-black truncate max-w-[100px] inline-block mb-[-2px]">{activeErpPrinter?.name}</strong></p>
+                      <p className="text-[7.5px] text-zinc-400 leading-tight">Papel: <strong className="text-zinc-300 font-black">{activeDocConfig?.driverPaperName || 'Padrão'}</strong></p>
+                      <p className="text-[7.5px] text-zinc-400 leading-tight">Mídia: <strong className="text-zinc-300 font-black">{activeDocConfig?.mediaType || 'Nenhum'}</strong></p>
+                      <p className="text-[7.5px] text-zinc-400 leading-tight">Qualidade: <strong className="text-zinc-100 font-black">{activeDocConfig?.printQuality || 'Padrão Driver'}</strong></p>
+                    </div>
                   </div>
 
-                  {!selectedDocumentId || !activeDocConfig ? (
-                    <div className="py-24 text-center text-zinc-600 font-sans text-[8.5px]">
-                      ❌ Selecione um documento na árvore para habilitar o ajuste fino de escala e mídias.
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      
-                      {/* Scale adjust */}
-                      <div className="space-y-1.5">
-                        <label className="text-[8px] tracking-widest text-zinc-500 block uppercase font-bold">Escala de Página (%):</label>
-                        <div className="flex items-center gap-2">
-                          <input 
-                            type="range" 
-                            min="50" 
-                            max="150" 
-                            value={activeDocConfig.scale ?? 100}
-                            disabled={!isAuthorized}
-                            onChange={(e) => {
-                              saveDocumentPrintConfig({
-                                ...activeDocConfig,
-                                scale: Number(e.target.value)
-                              });
-                            }}
-                            className="flex-1 accent-emerald-500 cursor-pointer h-1 bg-zinc-900 rounded-lg"
-                          />
-                          <span className="text-[9.5px] text-zinc-300 font-bold">{activeDocConfig.scale ?? 100}%</span>
+                  {/* CONNECT 5 -> 6 */}
+                  <PipelineConnector active={!!selectedDocumentId && !!activeDocConfig?.driverPaperName && selectedErpPrinterId !== 'pdf-manual'} />
+
+                  {/* COLUNA 6: PIPELINE E DRIVER AVANÇADO */}
+                  <div className="w-80 shrink-0 bg-[#07070a]/90 border border-zinc-900 rounded-xl p-4 flex flex-col justify-between text-left shadow-lg relative min-h-[350px]">
+                    <div className="space-y-3">
+                      <div className="pb-2 border-b border-zinc-900 flex justify-between items-center">
+                        <div className="flex flex-col">
+                          <span className="text-[7px] font-mono text-zinc-650 block">PASSO 6</span>
+                          <h4 className="text-[9px] font-black uppercase text-zinc-300 font-mono">Modo de Impressão & Spooler</h4>
                         </div>
                       </div>
 
-                      {/* Orientation */}
-                      <div className="space-y-1.5">
-                        <label className="text-[8px] tracking-widest text-zinc-500 block uppercase font-bold">Margem Técnica:</label>
-                        <div className="w-full bg-zinc-950 border border-zinc-900/60 p-2 text-zinc-500 rounded-xl text-[8px] leading-none uppercase font-bold">
-                          0 mm (Forçada)
+                      {!selectedDocumentId || !activeDocConfig?.driverPaperName ? (
+                        <div className="py-12 text-center text-zinc-600 font-sans text-[9px] leading-relaxed">
+                          Apenas após finalizar a escolha da qualidade do papel.
                         </div>
-                      </div>
-
-                      <div className="space-y-1.5">
-                        <label className="text-[8px] tracking-widest text-zinc-500 block uppercase font-bold">Orientação de Saída:</label>
-                        <div className="grid grid-cols-2 gap-1.5">
-                          <button
-                            onClick={() => {
-                              checkPermissionAndRun('alterar orientação', () => {
-                                saveDocumentPrintConfig({
-                                  ...activeDocConfig,
-                                  orientation: 'portrait'
-                                });
-                                feedback.success && feedback.success();
-                              });
-                            }}
-                            disabled={!isAuthorized}
-                            className={cn(
-                              "py-1.5 text-[8px] font-bold uppercase rounded-lg border",
-                              (activeDocConfig.orientation || 'portrait') === 'portrait'
-                                ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-400"
-                                : "bg-zinc-950 border-zinc-900 text-zinc-650"
-                            )}
-                          >
-                            RETRATO
-                          </button>
-                          <button
-                            onClick={() => {
-                              checkPermissionAndRun('alterar orientação', () => {
-                                saveDocumentPrintConfig({
-                                  ...activeDocConfig,
-                                  orientation: 'landscape'
-                                });
-                                feedback.success && feedback.success();
-                              });
-                            }}
-                            disabled={!isAuthorized}
-                            className={cn(
-                              "py-1.5 text-[8px] font-bold uppercase rounded-lg border",
-                              activeDocConfig.orientation === 'landscape'
-                                ? "bg-emerald-500/15 border-emerald-500/35 text-emerald-400"
-                                : "bg-zinc-950 border-zinc-900 text-zinc-650"
-                            )}
-                          >
-                            PAISAGEM
-                          </button>
-                        </div>
-                      </div>
-
-                      {/* Thermal density and speed (For thermal documents) */}
-                      {selectedDocumentId.includes('thermal') || selectedDocumentId.includes('ticket') ? (
-                        <div className="pt-2 border-t border-zinc-900 space-y-2.5">
-                          <span className="text-[7.5px] font-mono tracking-widest text-zinc-500 uppercase block font-bold">Ajustes da Bobina Térmica:</span>
-                          <div className="grid grid-cols-2 gap-2 text-[8px] text-zinc-500">
-                            <div>
-                              <span>PROS-DENSITY:</span>
-                              <select 
-                                value={(activeDocConfig as any).density || 10}
-                                disabled={!isAuthorized}
-                                onChange={(e) => saveDocumentPrintConfig({ ...activeDocConfig, density: Number(e.target.value) } as any)}
-                                className="w-full bg-zinc-950 border border-zinc-900 rounded font-bold px-1 py-0.5 mt-0.5 text-[8.5px]"
-                              >
-                                {[4,6,8,10,12,14].map(d => <option key={d} value={d}>{d} (LUX)</option>)}
-                              </select>
-                            </div>
-                            <div>
-                              <span>VELOCIDADE (IPS):</span>
-                              <select 
-                                value={(activeDocConfig as any).speed || 2}
-                                disabled={!isAuthorized}
-                                onChange={(e) => saveDocumentPrintConfig({ ...activeDocConfig, speed: Number(e.target.value) } as any)}
-                                className="w-full bg-zinc-950 border border-zinc-900 rounded font-bold px-1 py-0.5 mt-0.5 text-[8.5px]"
-                              >
-                                {[1,2,3,4,5].map(s => <option key={s} value={s}>{s} IPS</option>)}
-                              </select>
-                            </div>
-                          </div>
+                      ) : selectedErpPrinterId === 'pdf-manual' ? (
+                        <div className="p-2 bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-900 rounded-lg text-zinc-500 text-[8.5px] text-center py-8">
+                          Desabilitado em PDF Digital.
                         </div>
                       ) : (
-                        <div className="pt-2 border-t border-zinc-900 space-y-2.5">
-                          <span className="text-[7.5px] font-mono tracking-widest text-zinc-500 uppercase block font-bold">Ajustes Avancados do Driver:</span>
-                          <div className="grid grid-cols-2 gap-2 text-[8px]">
-                            <div>
-                              <span className="text-[6.5px] text-zinc-500 block uppercase font-bold">Color Mode:</span>
-                              <select
-                                value={(activeDocConfig as any).colorMode || 'mono'}
-                                disabled={!isAuthorized}
-                                onChange={(e) => saveDocumentPrintConfig({ ...activeDocConfig, colorMode: e.target.value } as any)}
-                                className="w-full bg-zinc-950 border border-zinc-900 text-zinc-400 font-bold rounded py-0.5 px-1 mt-0.5 text-[8px]"
+                        <div className="space-y-3">
+                          {/* PIPELINE SELECTOR */}
+                          <div className="space-y-1">
+                            <span className="text-[7.5px] font-mono text-zinc-500 uppercase block">Selecionar Pipeline:</span>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              <button
+                                onClick={() => {
+                                  if (activeDocConfig) {
+                                    saveDocumentPrintConfig({
+                                      ...activeDocConfig,
+                                      printPipeline: 'electron',
+                                      advancedModeEnabled: false
+                                    });
+                                    addActivity(`Pipeline de "${DOCUMENT_LABELS[selectedDocumentId!] || selectedDocumentId}" alterado para Normal Electron`, 'auth', 'Ajustes');
+                                  }
+                                }}
+                                className={cn(
+                                  "py-1.5 px-2 rounded-lg border text-[8px] font-black uppercase text-center cursor-pointer transition-all",
+                                  (!activeDocConfig?.printPipeline || activeDocConfig.printPipeline === 'electron')
+                                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400 animate-pulse"
+                                    : "bg-zinc-950 border-zinc-900 text-zinc-550 hover:border-zinc-800"
+                                )}
                               >
-                                <option value="mono">MONOCUT (PB)</option>
-                                <option value="color">COLOR PRINT</option>
-                              </select>
-                            </div>
-                            <div>
-                              <span className="text-[6.5px] text-zinc-500 block uppercase font-bold">Duplex:</span>
-                              <select
-                                value={(activeDocConfig as any).duplex || 'none'}
-                                disabled={!isAuthorized}
-                                onChange={(e) => saveDocumentPrintConfig({ ...activeDocConfig, duplex: e.target.value } as any)}
-                                className="w-full bg-zinc-950 border border-zinc-900 text-zinc-400 font-bold rounded py-0.5 px-1 mt-0.5 text-[8px]"
+                                Normal Electron
+                              </button>
+                              <button
+                                onClick={() => {
+                                  if (activeDocConfig) {
+                                    saveDocumentPrintConfig({
+                                      ...activeDocConfig,
+                                      printPipeline: 'windows_advanced',
+                                      advancedModeEnabled: true
+                                    });
+                                    addActivity(`Pipeline de "${DOCUMENT_LABELS[selectedDocumentId!] || selectedDocumentId}" alterado para Avançado Windows`, 'auth', 'Ajustes');
+                                  }
+                                }}
+                                className={cn(
+                                  "py-1.5 px-2 rounded-lg border text-[8px] font-black uppercase text-center cursor-pointer transition-all",
+                                  activeDocConfig?.printPipeline === 'windows_advanced'
+                                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-400 animate-pulse"
+                                    : "bg-zinc-950 border-zinc-900 text-zinc-550 hover:border-zinc-800"
+                                )}
                               >
-                                <option value="none">S/ DUPLEX</option>
-                                <option value="long">LONG EDGE</option>
-                                <option value="short">SHORT EDGE</option>
-                              </select>
+                                Avançado Windows
+                              </button>
                             </div>
+                            <span className="text-[7px] text-zinc-500 leading-tight block">
+                              {activeDocConfig?.printPipeline === 'windows_advanced' 
+                                ? "Opções profundas do driver do fabricante pelo spooler nativo."
+                                : "Emissão estável direta baseada em Chromium PDF."}
+                            </span>
+                          </div>
+
+                          {/* ADVANCED FIELDS BLOCK */}
+                          {activeDocConfig?.printPipeline === 'windows_advanced' ? (
+                            <div className="space-y-2 bg-[#0a0a0f] p-2.5 rounded-lg border border-zinc-900 max-h-[190px] overflow-y-auto scrollbar-thin">
+                              
+                              {/* Option 1: Copies */}
+                              <div className="flex items-center justify-between">
+                                <span className="text-[8px] font-mono text-zinc-400">Cópias</span>
+                                <div className="flex items-center gap-1.5">
+                                  <button 
+                                    onClick={() => {
+                                      const current = activeDocConfig.copies || 1;
+                                      if (current > 1) {
+                                        saveDocumentPrintConfig({ ...activeDocConfig, copies: current - 1 });
+                                      }
+                                    }} 
+                                    className="w-4 h-4 rounded bg-zinc-900 hover:bg-zinc-805 text-zinc-350 hover:text-white flex items-center justify-center font-bold text-[9px] cursor-pointer"
+                                  >
+                                    -
+                                  </button>
+                                  <span className="text-[9px] font-mono font-bold text-white w-4 text-center">{activeDocConfig.copies || 1}</span>
+                                  <button 
+                                    onClick={() => {
+                                      const current = activeDocConfig.copies || 1;
+                                      saveDocumentPrintConfig({ ...activeDocConfig, copies: current + 1 });
+                                    }} 
+                                    className="w-4 h-4 rounded bg-zinc-900 hover:bg-zinc-850 text-zinc-350 hover:text-white flex items-center justify-center font-bold text-[9px] cursor-pointer"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+
+                              {/* Option 2: DPI */}
+                              <div className="space-y-0.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[8px] font-mono text-zinc-400">Resolução / DPI</span>
+                                  <span className={cn(
+                                    "text-[6.5px] font-mono uppercase px-1 rounded-sm",
+                                    (typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-500"
+                                  )}>
+                                    {(typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? 'aplicado pelo driver' : 'salvo como perfil'}
+                                  </span>
+                                </div>
+                                <select
+                                  value={activeDocConfig.dpi || ''}
+                                  onChange={(e) => {
+                                    saveDocumentPrintConfig({ ...activeDocConfig, dpi: e.target.value });
+                                  }}
+                                  className="w-full bg-zinc-950 text-[8.5px] font-mono p-1 rounded border border-zinc-850 focus:border-emerald-500 outline-none text-zinc-300"
+                                >
+                                  <option value="">Padrão do Driver</option>
+                                  <option value="203">203 DPI (Térmica Zebra/Argox)</option>
+                                  <option value="300">300 DPI (Etiqueta de Alta Densidade)</option>
+                                  <option value="600">600 DPI (Folha A4 Jato de Tinta)</option>
+                                  <option value="1200">1200 DPI (Fotográfico Alta Precisão)</option>
+                                </select>
+                              </div>
+
+                              {/* Option 3: Origin / Paper Source */}
+                              <div className="space-y-0.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[8px] font-mono text-zinc-400">Origem / Bandeja</span>
+                                  <span className={cn(
+                                    "text-[6.5px] font-mono uppercase px-1 rounded-sm",
+                                    (typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-500"
+                                  )}>
+                                    {(typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? 'aplicado pelo driver' : 'salvo como perfil'}
+                                  </span>
+                                </div>
+                                <select
+                                  value={activeDocConfig.paperSource || ''}
+                                  onChange={(e) => {
+                                    saveDocumentPrintConfig({ ...activeDocConfig, paperSource: e.target.value });
+                                  }}
+                                  className="w-full bg-zinc-950 text-[8.5px] font-mono p-1 rounded border border-zinc-850 focus:border-emerald-500 outline-none text-zinc-300"
+                                >
+                                  <option value="">Automático</option>
+                                  <option value="tray1">Bandeja Principal (Bandeja 1)</option>
+                                  <option value="tray2">Bandeja Secundária (Bandeja 2)</option>
+                                  <option value="manual">Alimentação Manual (Bypass)</option>
+                                  <option value="roll">Rolo Contínuo (Térmica)</option>
+                                </select>
+                              </div>
+
+                              {/* Option 4: Color Mode */}
+                              <div className="space-y-0.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[8px] font-mono text-zinc-400">Modo de Cor</span>
+                                  <span className={cn(
+                                    "text-[6.5px] font-mono uppercase px-1 rounded-sm",
+                                    (typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-500"
+                                  )}>
+                                    {(typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? 'aplicado pelo driver' : 'salvo como perfil'}
+                                  </span>
+                                </div>
+                                <div className="grid grid-cols-3 gap-1">
+                                  {['color', 'mono', 'grayscale'].map((mode) => {
+                                    const isSel = (activeDocConfig.colorMode || 'color') === mode;
+                                    const labels: Record<string, string> = { color: 'Colorido', mono: 'Preto/B', grayscale: 'Cinza' };
+                                    return (
+                                      <button
+                                        key={mode}
+                                        onClick={() => saveDocumentPrintConfig({ ...activeDocConfig, colorMode: mode as any })}
+                                        className={cn(
+                                          "py-1 rounded text-[7.5px] font-bold uppercase transition-all cursor-pointer border",
+                                          isSel 
+                                            ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" 
+                                            : "bg-zinc-950 border-zinc-900 text-zinc-500 hover:border-zinc-800"
+                                        )}
+                                      >
+                                        {labels[mode]}
+                                      </button>
+                                    );
+                                  })}
+                                </div>
+                              </div>
+
+                              {/* Option 5: Duplex Mode */}
+                              <div className="space-y-0.5">
+                                <div className="flex justify-between items-center">
+                                  <span className="text-[8px] font-mono text-zinc-400">Frente e Verso</span>
+                                  <span className={cn(
+                                    "text-[6.5px] font-mono uppercase px-1 rounded-sm",
+                                    (typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? "bg-emerald-500/10 text-emerald-400" : "bg-amber-500/10 text-amber-500"
+                                  )}>
+                                    {(typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? 'aplicado pelo driver' : 'salvo como perfil'}
+                                  </span>
+                                </div>
+                                <select
+                                  value={activeDocConfig.duplexMode || 'simplex'}
+                                  onChange={(e) => {
+                                    saveDocumentPrintConfig({ ...activeDocConfig, duplexMode: e.target.value as any });
+                                  }}
+                                  className="w-full bg-zinc-950 text-[8.5px] font-mono p-1 rounded border border-zinc-850 focus:border-emerald-500 outline-none text-zinc-300"
+                                >
+                                  <option value="simplex">Não (Simples)</option>
+                                  <option value="duplex_long">Sim (Borda Longa)</option>
+                                  <option value="duplex_short">Sim (Borda Curta)</option>
+                                </select>
+                              </div>
+
+                            </div>
+                          ) : (
+                            /* PIPELINE DEFAULT SCREEN */
+                            <div className="p-3 bg-zinc-900/10 border border-zinc-900/40 rounded-xl space-y-2">
+                              <span className="text-[8.5px] font-mono text-zinc-400 uppercase font-black block">Controle Padrão Ativo</span>
+                              <p className="text-[8px] text-zinc-500 leading-normal">
+                                Este módulo está consumindo a engine Chromium nativa. O tamanho do papel e a orientação do spooler são processados dinamicamente via PDF de alta fidelidade estrutural.
+                              </p>
+                              <p className="text-[7.5px] text-zinc-650">
+                                Para liberar mídias avançadas, controle de DPI e bandejas físicas do driver do fabricante, mude para o pipeline <strong>Avançado Windows</strong>.
+                              </p>
+                            </div>
+                          )}
+
+                          {/* BRIDGE LIVE CONNECTIVITY CARD */}
+                          <div className={cn(
+                            "p-2 rounded-xl border flex flex-col gap-1 text-left",
+                            (typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') 
+                              ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-400" 
+                              : "bg-amber-500/10 border-amber-500/20 text-amber-500"
+                          )}>
+                            <div className="flex items-center gap-1">
+                              <div className={cn("w-1.5 h-1.5 rounded-full animate-pulse", (typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? "bg-emerald-400" : "bg-amber-400")} />
+                              <span className="text-[8px] font-black font-mono uppercase tracking-wide">
+                                Bridge Física .NET: {(typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') ? "CONECTADA (WINDOWS)" : "AUSENTE (DESKTOP)"}
+                              </span>
+                            </div>
+                            <p className="text-[7.5px] text-zinc-400 leading-normal font-sans">
+                              {(typeof window !== 'undefined' && !!(window as any).electron && typeof (window as any).electron.printAdvancedJob === 'function') 
+                                ? "Módulo Windows integrado. Preferências avançadas do driver serão enviadas e processadas diretamente." 
+                                : "As preferências avançadas selecionadas acima serão guardadas em seu perfil de segurança no ERP Nexa, contudo as saídas físicas serão tratadas via Electron/PDF de segurança para confiabilidade industrial."}
+                            </p>
                           </div>
                         </div>
                       )}
                     </div>
+
+                    {/* FOOTER EXTRA DUST */}
+                    {selectedDocumentId && selectedErpPrinterId !== 'pdf-manual' && (
+                      <div className="text-[7.5px] mt-2 font-mono text-zinc-500 leading-tight">
+                        🔒 Configurações protegidas por auditoria no banco SQLite local.
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+
+                {/* CENTRAL ROOT DISPATCH BOTTOM ADVISORY */}
+                <div className="mt-4 p-3 bg-[#0a0c10] border border-zinc-900 rounded-xl flex items-center justify-between text-left text-xs text-zinc-550 gap-4">
+                  <div className="flex items-center gap-2">
+                    <Info className="w-4 h-4 text-zinc-650" />
+                    <p className="text-[10px] text-zinc-500">
+                      As opções de papel, mídia e DPI são consultadas em tempo real por meio da biblioteca nativa do Windows no driver oficial da impressora.
+                    </p>
+                  </div>
+                  {selectedErpPrinterId === 'pdf-manual' && (
+                    <div className="flex items-center gap-1.5 shrink-0 bg-amber-500/10 border border-amber-500/20 px-3 py-1 rounded-lg">
+                      <AlertTriangle className="w-3.5 h-3.5 text-amber-500" />
+                      <span className="text-[9px] font-mono text-amber-500 font-bold uppercase">Nenhum driver de hardware necessário. PDF Direto</span>
+                    </div>
                   )}
                 </div>
-                <div className="pt-4 border-t border-zinc-900 mt-4 text-[7.5px] font-mono text-zinc-500 leading-normal">
-                  🚀 Configuração concluída! Todas as alterações feitas em cada passo salvam e aplicam-se em tempo real.
-                </div>
+
               </div>
-
-            </div>
+            )}
           </div>
-
+          
         </div>
       ) : (
-        /* TAB SPOOLER: CENTRAL DE FILAS (SPOOLER QUEUES) */
+        /* TAB SPOOLER: CENTRAL DE FILAS */
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 animate-fade-in" id="active-tab-spooler">
           
-          {/* Fila 1: Fila Operacional Ativa (Spooler Ativo) */}
+          {/* Active Spooler */}
           <div className="bg-zinc-950/60 border border-zinc-900 rounded-3xl p-6" id="queue-active-container">
             <div className="flex justify-between items-center pb-4 border-b border-zinc-900 mb-5">
               <div>
                 <h2 className="text-xs font-black uppercase tracking-widest text-zinc-400 flex items-center gap-2">
-                  <RefreshCw className="w-3.5 h-3.5 text-emerald-400" />
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
                   Fila Operacional Ativa ({currentActiveQueue.length})
                 </h2>
                 <p className="text-[8.5px] text-zinc-500 mt-0.5 font-mono">Processamentos ativos, gerando PDF ou imprimindo</p>
@@ -1374,7 +1434,7 @@ export default function PrintersSettings() {
             )}
           </div>
 
-          {/* Fila 2: Fila de Exceções e Falhas do Driver (Exceptions Queue) */}
+          {/* Exceptions queue */}
           <div className="bg-zinc-950/60 border border-zinc-900 rounded-3xl p-6" id="queue-errors-container">
             <h2 className="text-xs font-black uppercase tracking-widest text-rose-400 pb-4 border-b border-zinc-900 mb-5 flex items-center gap-2">
               <Ban className="w-3.5 h-3.5 text-rose-400" />

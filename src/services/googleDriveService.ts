@@ -43,6 +43,13 @@ const notifyListeners = () => {
 
 // Queue of unsynced backups when offline
 const OFFLINE_QUEUE_KEY = 'erp_gdrive_offline_queue';
+const DESKTOP_TOKENS_KEY = 'nexa_gdrive_desktop_tokens';
+
+// Global execution locks and backoff safety helpers for blindagem
+let isSyncingActive = false;
+let isProcessingOfflineQueue = false;
+let consecutiveFailures = 0;
+let nextAllowedRetryTime = 0;
 
 /**
  * Service to handle Google Drive OAuth authentication and backup/restore integration
@@ -75,30 +82,113 @@ export const GoogleDriveService = {
   },
 
   /**
+   * Checks if running in an Electron environment
+   */
+  isElectron(): boolean {
+    return typeof window !== 'undefined' && !!(window as any).electron;
+  },
+
+  /**
+   * Ensures the active access token is fresh (re-auth or refresh if needed on desktop)
+   */
+  async ensureActiveToken(): Promise<string> {
+    if (this.isElectron()) {
+      try {
+        const stored = localStorage.getItem(DESKTOP_TOKENS_KEY);
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          const isExpired = Date.now() > (parsed.createdAt + (parsed.expiresIn * 1000) - 60000); // 1-minute safety buffer
+
+          if (isExpired && parsed.refreshToken) {
+            console.log('[GoogleDriveService][Desktop] Access token expired, auto-refreshing...');
+            const electronAPI = (window as any).electron;
+            if (electronAPI && typeof electronAPI.googleDriveRefresh === 'function') {
+              const res = await electronAPI.googleDriveRefresh({ refreshToken: parsed.refreshToken });
+              if (res && res.success) {
+                cachedToken = res.accessToken;
+                
+                // Update persistent storage
+                localStorage.setItem(DESKTOP_TOKENS_KEY, JSON.stringify({
+                  accessToken: res.accessToken,
+                  refreshToken: parsed.refreshToken,
+                  expiresIn: res.expiresIn,
+                  createdAt: res.createdAt,
+                  user: parsed.user
+                }));
+                notifyListeners();
+                return res.accessToken;
+              } else {
+                console.warn('[GoogleDriveService][Desktop] Auto-refresh failed:', res?.error);
+                await this.disconnect();
+                throw new Error(res?.error || 'Não foi possível renovar as credenciais do Google Drive.');
+              }
+            }
+          } else {
+            cachedToken = parsed.accessToken;
+            return parsed.accessToken;
+          }
+        }
+      } catch (e: any) {
+        console.error('[GoogleDriveService][Desktop] Error in ensureActiveToken:', e);
+        throw e;
+      }
+    }
+
+    if (!cachedToken) {
+      throw new Error('Por favor, conecte sua conta Google Drive primeiro.');
+    }
+    return cachedToken;
+  },
+
+  /**
    * Initializes auth state check on app start
    */
   initialize(): Promise<boolean> {
     return new Promise((resolve) => {
+      if (this.isElectron()) {
+        try {
+          const stored = localStorage.getItem(DESKTOP_TOKENS_KEY);
+          if (stored) {
+            const parsed = JSON.parse(stored);
+            cachedUser = parsed.user;
+            
+            // Validate and fetch/refresh token
+            this.ensureActiveToken()
+              .then((token) => {
+                cachedToken = token;
+                currentStatus = 'connected';
+                notifyListeners();
+                this.processOfflineQueue();
+                resolve(true);
+              })
+              .catch(() => {
+                // If validation failed, disconnect cleanly
+                this.disconnect().then(() => resolve(false));
+              });
+            return;
+          }
+        } catch (e) {
+          console.error('[GoogleDriveService] Error initializing desktop:', e);
+        }
+        currentStatus = 'disconnected';
+        notifyListeners();
+        resolve(false);
+        return;
+      }
+
+      // Existing Web Flow (Firebase Auth)
       onAuthStateChanged(auth, async (firebaseUser: User | null) => {
         if (firebaseUser) {
           try {
-            // Firebase returns ID Token, we can get Google Provider Access Token via fresh login or cached credentials.
-            // If the user refreshed the window, we might need them to click "Login" again to refresh the access token 
-            // since Firebase itself doesn't persist the Google Auth access token in default session profile.
-            // However, we cache the access token in memory as instructed.
             cachedUser = {
               displayName: firebaseUser.displayName,
               email: firebaseUser.email,
               photoURL: firebaseUser.photoURL,
             };
             
-            // To be transparent, if cachedToken is null, we set status to connected if we can obtain a token
-            // silently or wait for user to click connecting.
             if (cachedToken) {
               currentStatus = 'connected';
             } else {
-              // We are connected in Firebase, but we need the actual access_token for Google Drive calls.
-              // We'll mark as disconnected so user can click to restore token safely.
               currentStatus = 'disconnected';
             }
           } catch (err) {
@@ -124,12 +214,54 @@ export const GoogleDriveService = {
   },
 
   /**
-   * Triggers the Google Drive Login and authentication popup
+   * Triggers the Google Drive Login and authentication popup / desktop loopback OAuth
    */
   async connect(forceSelectAccount: boolean = false): Promise<boolean> {
     currentStatus = 'connecting';
     lastError = null;
     notifyListeners();
+
+    if (this.isElectron()) {
+      try {
+        const electronAPI = (window as any).electron;
+        if (!electronAPI || typeof electronAPI.googleDriveConnect !== 'function') {
+          throw new Error('Canal de comunicação Electron para Google Drive não encontrado.');
+        }
+
+        const res = await electronAPI.googleDriveConnect();
+        if (!res || !res.success) {
+          throw new Error(res?.error || 'A conexão com o Google Drive foi cancelada ou falhou.');
+        }
+
+        cachedToken = res.tokens.accessToken;
+        cachedUser = {
+          displayName: res.user.displayName,
+          email: res.user.email,
+          photoURL: res.user.photoURL,
+        };
+
+        currentStatus = 'connected';
+
+        // Persist token information
+        localStorage.setItem(DESKTOP_TOKENS_KEY, JSON.stringify({
+          accessToken: res.tokens.accessToken,
+          refreshToken: res.tokens.refreshToken,
+          expiresIn: res.tokens.expiresIn,
+          createdAt: res.tokens.createdAt,
+          user: cachedUser
+        }));
+
+        notifyListeners();
+        await this.processOfflineQueue();
+        return true;
+      } catch (err: any) {
+        console.error('[GoogleDriveService][Desktop] Erro ao conectar ao Google Drive:', err);
+        currentStatus = 'error';
+        lastError = err.message || 'Erro de autenticação no desktop.';
+        notifyListeners();
+        return false;
+      }
+    }
 
     try {
       const provider = new GoogleAuthProvider();
@@ -188,6 +320,16 @@ export const GoogleDriveService = {
    * Signs out of Google integration
    */
   async disconnect(): Promise<void> {
+    if (this.isElectron()) {
+      localStorage.removeItem(DESKTOP_TOKENS_KEY);
+      cachedToken = null;
+      cachedUser = null;
+      currentStatus = 'disconnected';
+      lastError = null;
+      notifyListeners();
+      return;
+    }
+
     const token = cachedToken;
     if (token) {
       try {
@@ -226,16 +368,56 @@ export const GoogleDriveService = {
   },
 
   /**
-   * Core helper to find or create the 'ERP-Industrial-Backups' directory
+   * Finds or creates a subfolder inside a parent folder
    */
-  async getOrCreateBackupFolder(token: string): Promise<string> {
+  async getOrCreateSubfolder(token: string, parentId: string, subfolderName: string): Promise<string> {
+    const query = encodeURIComponent(`name = '${subfolderName}' and mimeType = 'application/vnd.google-apps.folder' and '${parentId}' in parents and trashed = false`);
+    const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
+      headers: { 'Authorization': `Bearer ${token}` }
+    });
+    
+    if (!response.ok) {
+      throw new Error(`Falha ao consultar diretório ${subfolderName} no Google Drive.`);
+    }
+    
+    const data = await response.json();
+    if (data.files && data.files.length > 0) {
+      return data.files[0].id;
+    }
+
+    // Creating folder
+    const createResponse = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        name: subfolderName,
+        mimeType: 'application/vnd.google-apps.folder',
+        parents: [parentId]
+      })
+    });
+
+    if (!createResponse.ok) {
+      throw new Error(`Não foi possível criar a pasta ${subfolderName} no Google Drive.`);
+    }
+
+    const folder = await createResponse.json();
+    return folder.id;
+  },
+
+  /**
+   * Finds or creates parent folder 'ERP-Industrial-Backups'
+   */
+  async getOrCreateParentFolder(token: string): Promise<string> {
     const query = encodeURIComponent("name = 'ERP-Industrial-Backups' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
     const response = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)`, {
       headers: { 'Authorization': `Bearer ${token}` }
     });
     
     if (!response.ok) {
-      throw new Error('Falha ao consultar diretórios no Google Drive.');
+      throw new Error('Falha ao consultar diretório pai no Google Drive.');
     }
     
     const data = await response.json();
@@ -265,18 +447,114 @@ export const GoogleDriveService = {
   },
 
   /**
+   * Core helper to find or create the 'ERP-Industrial-Backups' subdirectories
+   */
+  async getOrCreateBackupFolder(token: string, type: 'auto' | 'manual' = 'auto'): Promise<string> {
+    const parentFolderId = await this.getOrCreateParentFolder(token);
+    const subfolderName = type === 'auto' ? 'AutoBackups' : 'ManualBackups';
+    return this.getOrCreateSubfolder(token, parentFolderId, subfolderName);
+  },
+
+  /**
+   * Enforces retention policy on Google Drive (keeps last 15 auto backups)
+   */
+  async enforceGoogleDriveRetention(token: string, folderId: string): Promise<number> {
+    try {
+      const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${query}&orderBy=createdTime+desc&fields=files(id,name,createdTime)&pageSize=100`,
+        {
+          headers: { 'Authorization': `Bearer ${token}` }
+        }
+      );
+
+      if (!response.ok) {
+        console.warn('[GoogleDriveService] Falha ao listar arquivos para conferência de retenção no Drive.');
+        return 0;
+      }
+
+      const data = await response.json();
+      const files = data.files || [];
+      
+      if (files.length > 15) {
+        const toDelete = files.slice(15);
+        let deletedCount = 0;
+        for (const f of toDelete) {
+          const delRes = await fetch(`https://www.googleapis.com/drive/v3/files/${f.id}`, {
+            method: 'DELETE',
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          if (delRes.ok) {
+            deletedCount++;
+          } else {
+            console.warn(`[GoogleDriveService] Falha ao deletar arquivo antigo ${f.name} do Drive:`, delRes.statusText);
+          }
+        }
+        console.log(`[GoogleDriveService-RETENTION] Prunados ${deletedCount} backups automáticos antigos no Google Drive.`);
+        return deletedCount;
+      }
+      return 0;
+    } catch (e) {
+      console.error('[GoogleDriveService-RETENTION] Erro de rede ou autorização ao aplicar retenção Google Drive:', e);
+      return 0;
+    }
+  },
+
+  isBackoffActive(): boolean {
+    if (consecutiveFailures > 0 && Date.now() < nextAllowedRetryTime) {
+      return true;
+    }
+    return false;
+  },
+
+  getBackoffTimeRemaining(): number {
+    return Math.max(0, Math.round((nextAllowedRetryTime - Date.now()) / 1000));
+  },
+
+  incrementFailure() {
+    consecutiveFailures++;
+    const delayMs = Math.min(30 * 1000 * Math.pow(2, consecutiveFailures - 1), 30 * 60 * 1000); // 30s, 60s, 120s... max 30 min
+    nextAllowedRetryTime = Date.now() + delayMs;
+    console.warn(`[GoogleDriveService] Falha de comunicação #${consecutiveFailures}. Próximo retry em ${delayMs / 1000}s.`);
+  },
+
+  resetFailure() {
+    consecutiveFailures = 0;
+    nextAllowedRetryTime = 0;
+  },
+
+  /**
    * Syncs custom State data silently to the cloud
    */
-  async uploadBackupToCloud(backupDataString: string, originalFileName?: string): Promise<boolean> {
-    const token = cachedToken;
+  async uploadBackupToCloud(backupDataString: string, originalFileName?: string, type: 'auto' | 'manual' = 'auto'): Promise<boolean> {
+    if (isSyncingActive) {
+      console.warn('[GoogleDriveService] Envio concorrente bloqueado por lock ativo.');
+      return false;
+    }
+
+    if (this.isBackoffActive()) {
+      console.warn(`[GoogleDriveService] Upload abortado devido a backoff ativo por falhas consecutivas. Tempo restante: ${this.getBackoffTimeRemaining()}s`);
+      // Keep it enqueued offline defensively
+      this.queueOfflineBackup(backupDataString, originalFileName);
+      return false;
+    }
+
+    isSyncingActive = true;
+    let token = cachedToken;
+    try {
+      token = await this.ensureActiveToken();
+    } catch (_) {}
+
     if (!token) {
       console.warn('[GoogleDriveService] Tentativa de backup sem login ativo no Google Drive.');
+      isSyncingActive = false;
       this.queueOfflineBackup(backupDataString, originalFileName);
       return false;
     }
 
     if (!navigator.onLine) {
       console.log('[GoogleDriveService] Dispositivo offline, enfileirando backup.');
+      isSyncingActive = false;
       this.queueOfflineBackup(backupDataString, originalFileName);
       return false;
     }
@@ -285,8 +563,8 @@ export const GoogleDriveService = {
     notifyListeners();
 
     try {
-      const folderId = await this.getOrCreateBackupFolder(token);
-      const name = originalFileName || `backup-erp-industrial-${new Date().toISOString().slice(0, 19).replace(/T/g, '-').replace(/:/g, '-')}.json`;
+      const folderId = await this.getOrCreateBackupFolder(token, type);
+      const name = originalFileName || `backup-${type === 'auto' ? 'auto' : 'manual'}-erp-industrial-${new Date().toISOString().slice(0, 19).replace(/T/g, '-').replace(/:/g, '-')}.json`;
 
       const metadata = {
         name,
@@ -322,8 +600,23 @@ export const GoogleDriveService = {
       }
 
       currentStatus = 'synced';
-      useStore.getState().setGoogleDriveLastSyncAt(Date.now());
+      this.resetFailure();
+      
+      const storeState = useStore.getState();
+      storeState.setGoogleDriveLastSyncAt(Date.now());
+      // ONLY clear dirty state once sync successfully completes entirely
+      storeState.setIsDriveDirty?.(false);
+      
       notifyListeners();
+
+      // Prune old auto backups if uploaded as 'auto'
+      if (type === 'auto') {
+        try {
+          await this.enforceGoogleDriveRetention(token, folderId);
+        } catch (retErr) {
+          console.error('[GoogleDriveService] Falha ao rotacionar backups antigos no Drive:', retErr);
+        }
+      }
 
       // Reset to connected status after some seconds
       setTimeout(() => {
@@ -340,26 +633,32 @@ export const GoogleDriveService = {
       lastError = err.message || 'Erro de rede ao sincronizar com Google Drive.';
       notifyListeners();
       
+      this.incrementFailure();
+      
       // Keep it in offline queue as defensive sync structure
       this.queueOfflineBackup(backupDataString, originalFileName);
       return false;
+    } finally {
+      isSyncingActive = false;
     }
   },
 
   /**
-   * List all backups in the Google Drive folder
+   * List all backups across AutoBackups and ManualBackups folders in Google Drive
    */
-  async listCloudBackups(): Promise<Array<{ id: string; name: string; createdTime: string; size: string }>> {
-    const token = cachedToken;
+  async listCloudBackups(): Promise<Array<{ id: string; name: string; createdTime: string; size: string; type: 'auto' | 'manual' }>> {
+    const token = await this.ensureActiveToken();
     if (!token) {
       throw new Error('Por favor, conecte sua conta Google Drive primeiro.');
     }
 
     try {
-      const folderId = await this.getOrCreateBackupFolder(token);
-      const query = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
+      const autoFolderId = await this.getOrCreateBackupFolder(token, 'auto');
+      const manualFolderId = await this.getOrCreateBackupFolder(token, 'manual');
+      
+      const query = encodeURIComponent(`('${autoFolderId}' in parents or '${manualFolderId}' in parents) and trashed = false`);
       const response = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${query}&orderBy=createdTime+desc&fields=files(id,name,createdTime,size)&pageSize=30`,
+        `https://www.googleapis.com/drive/v3/files?q=${query}&orderBy=createdTime+desc&fields=files(id,name,createdTime,size,parents)&pageSize=100`,
         {
           headers: { 'Authorization': `Bearer ${token}` }
         }
@@ -370,7 +669,17 @@ export const GoogleDriveService = {
       }
 
       const data = await response.json();
-      return data.files || [];
+      const files = data.files || [];
+      return files.map((file: any) => {
+        const isAuto = file.parents && file.parents.includes(autoFolderId);
+        return {
+          id: file.id,
+          name: file.name,
+          createdTime: file.createdTime,
+          size: file.size || '0',
+          type: isAuto ? 'auto' : 'manual'
+        };
+      });
     } catch (err) {
       console.error('[GoogleDriveService] Erro ao listar arquivos:', err);
       throw err;
@@ -381,7 +690,7 @@ export const GoogleDriveService = {
    * Restores a backup file from Google Drive and returns the parsed JSON
    */
   async downloadAndValidateCloudBackup(fileId: string): Promise<any> {
-    const token = cachedToken;
+    const token = await this.ensureActiveToken();
     if (!token) {
       throw new Error('Por favor, conecte sua conta Google Drive para restaurar.');
     }
@@ -418,11 +727,7 @@ export const GoogleDriveService = {
       const queueRaw = localStorage.getItem(OFFLINE_QUEUE_KEY);
       const queue = queueRaw ? JSON.parse(queueRaw) : [];
       
-      // De-duplicate backups based on content hash or keep last one to avoid bloating localStorage
-      // To satisfy user intent: we can just save the most recent backup structure
       const item = { name, dataString, timestamp: Date.now() };
-      
-      // Kept narrow: keep last 3 unsynced backups to avoid localStorage crash
       const updatedQueue = [...queue.slice(-2), item];
       localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(updatedQueue));
       console.log('[GoogleDriveService] Backup enfileirado offline com sucesso.');
@@ -432,10 +737,17 @@ export const GoogleDriveService = {
   },
 
   /**
-   * Process all pending offline backups once online
+   * Process all pending offline backups once online with strict locks to prevent duplication
    */
   async processOfflineQueue() {
     if (!navigator.onLine || !cachedToken) return;
+    if (isProcessingOfflineQueue) {
+      console.log('[GoogleDriveService] Fila offline já está sendo processada por outro lock ativo.');
+      return;
+    }
+
+    isProcessingOfflineQueue = true;
+    console.log('[GoogleDriveService] Iniciando processamento seguro da fila offline...');
 
     try {
       const queueRaw = localStorage.getItem(OFFLINE_QUEUE_KEY);
@@ -446,16 +758,24 @@ export const GoogleDriveService = {
 
       console.log(`[GoogleDriveService] Processando fila de sincronização (${queue.length} backups)...`);
       
+      // Crucial: remove/freeze immediately before dispatching to completely prevent duplication
+      localStorage.removeItem(OFFLINE_QUEUE_KEY);
+
       // Sync in sequential order
       for (const item of queue) {
-        await this.uploadBackupToCloud(item.dataString, item.name);
+        // We override syncingActive temporarily to permit sequential queue uploads
+        isSyncingActive = false;
+        const success = await this.uploadBackupToCloud(item.dataString, item.name);
+        if (!success) {
+          console.warn(`[GoogleDriveService] Falha ao enviar item da fila: ${item.name}. Devolvendo à fila.`);
+          this.queueOfflineBackup(item.dataString, item.name);
+        }
       }
-
-      // Empty queue on completion
-      localStorage.removeItem(OFFLINE_QUEUE_KEY);
-      console.log('[GoogleDriveService] Fila de sincronização concluída com sucesso.');
+      console.log('[GoogleDriveService] Fila de sincronização processada.');
     } catch (err) {
-      console.error('[GoogleDriveService] Erro ao esvaziar fila:', err);
+      console.error('[GoogleDriveService] Erro ao processar fila offline:', err);
+    } finally {
+      isProcessingOfflineQueue = false;
     }
   }
 };

@@ -25,16 +25,18 @@ import {
   ShoppingBag,
   Grid,
   ChevronRight,
+  ChevronLeft,
   Tablet,
   Printer,
   Eye,
-  AlertCircle
+  AlertCircle,
+  Layers
 } from 'lucide-react';
 import { useStore, CartItem, Sale, User, Client } from '../store';
 import { roundMoney, safeAdd, safeSubtract, safeMultiply } from '../utils/money';
 import PdvTotemAdmin from '../components/PdvTotemAdmin';
-import { CanonicalDocumentPreview } from '../components/documentPreview/CanonicalDocumentPreview';
 import { generateCanonicalPdfBlob, downloadOrSharePdf } from '../services/pdfEngine/pdfGenerator';
+import { ThreeDViewer } from '../components/ThreeDViewer';
 
 export function generatePixPayload(key: string, amount: number, receiver: string, city: string = 'SAO PAULO') {
   const cleanKey = key.replace(/[^\w@.-]/g, '');
@@ -84,6 +86,7 @@ export default function PdvTotemModule() {
   // Core navigation step
   // 'start' | 'customer' | 'products' | 'cart' | 'payment' | 'success'
   const [step, setStep] = useState<'start' | 'customer' | 'products' | 'cart' | 'payment' | 'success'>('start');
+  const [showStartOptions, setShowStartOptions] = useState(false);
 
   // Client Selection State
   const [isAnonymous, setIsAnonymous] = useState(false);
@@ -112,13 +115,42 @@ export default function PdvTotemModule() {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedProductDetails, setSelectedProductDetails] = useState<typeof products[0] | null>(null);
+  const [viewing3D, setViewing3D] = useState<boolean>(false);
   const [modalQuantity, setModalQuantity] = useState<number>(1);
   const [selectedSabor, setSelectedSabor] = useState<string>('Padrão');
+  const [selectedVariationId, setSelectedVariationId] = useState<string>('');
   const [activeImageIndex, setActiveImageIndex] = useState<number>(0);
+  const touchStartXRef = useRef(0);
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (viewing3D) return; // Ignore swipe in 3D viewer
+    touchStartXRef.current = e.touches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    if (viewing3D) return; // Ignore swipe in 3D viewer
+    const touchEndX = e.changedTouches[0].clientX;
+    const diff = touchStartXRef.current - touchEndX;
+    if (Math.abs(diff) > 40 && modalImagesList.length > 0) {
+      if (diff > 0) {
+        setActiveImageIndex(prev => (prev + 1) % modalImagesList.length);
+      } else {
+        setActiveImageIndex(prev => (prev - 1 + modalImagesList.length) % modalImagesList.length);
+      }
+    }
+  };
 
   useEffect(() => {
     if (selectedProductDetails) {
       setActiveImageIndex(0);
+      setViewing3D(false);
+      if (selectedProductDetails.variations && selectedProductDetails.variations.length > 0) {
+        setSelectedVariationId(selectedProductDetails.variations[0].id);
+        setSelectedSabor(selectedProductDetails.variations[0].name);
+      } else {
+        setSelectedVariationId('');
+        setSelectedSabor('Padrão');
+      }
     }
   }, [selectedProductDetails]);
 
@@ -198,6 +230,115 @@ export default function PdvTotemModule() {
   // Finished order references
   const [lastSale, setLastSale] = useState<Sale | null>(null);
   const [successCountdown, setSuccessCountdown] = useState(10);
+
+  // Cancel confirmation and checkout inactivity states
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [showTimeoutModal, setShowTimeoutModal] = useState(false);
+  const [timeoutCountdown, setTimeoutCountdown] = useState(15);
+  const timeoutTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const countdownTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  const showTimeoutModalRef = useRef(showTimeoutModal);
+  showTimeoutModalRef.current = showTimeoutModal;
+
+  const stepRefForTimeout = useRef(step);
+  stepRefForTimeout.current = step;
+
+  const paymentStatusRefForTimeout = useRef(paymentStatus);
+  paymentStatusRefForTimeout.current = paymentStatus;
+
+  // Function to reset the 90 seconds inactive timer
+  const resetInactivityTimer = () => {
+    if (timeoutTimerRef.current) {
+      clearTimeout(timeoutTimerRef.current);
+    }
+    if (showTimeoutModalRef.current) {
+      return;
+    }
+
+    const isStepActive = stepRefForTimeout.current !== 'start' && stepRefForTimeout.current !== 'success';
+    const isPaymentNotDone = paymentStatusRefForTimeout.current !== 'done';
+
+    if (isStepActive && isPaymentNotDone) {
+      timeoutTimerRef.current = setTimeout(() => {
+        setShowTimeoutModal(true);
+        setTimeoutCountdown(15);
+      }, 90000); // 90 seconds
+    }
+  };
+
+  const handleContinueSession = () => {
+    setShowTimeoutModal(false);
+  };
+
+  const handleEndSession = () => {
+    setShowTimeoutModal(false);
+    startNewSession();
+  };
+
+  // Inactivity countdown handler
+  useEffect(() => {
+    if (showTimeoutModal) {
+      if (timeoutTimerRef.current) {
+        clearTimeout(timeoutTimerRef.current);
+      }
+      countdownTimerRef.current = setInterval(() => {
+        setTimeoutCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(countdownTimerRef.current!);
+            setShowTimeoutModal(false);
+            startNewSession();
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+    } else {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+      }
+    }
+
+    return () => {
+      if (countdownTimerRef.current) {
+        clearInterval(countdownTimerRef.current);
+      }
+    };
+  }, [showTimeoutModal]);
+
+  // Main interaction tracking effect
+  useEffect(() => {
+    const isStepActive = step !== 'start' && step !== 'success';
+    const isPaymentNotDone = paymentStatus !== 'done';
+
+    if (!isStepActive || !isPaymentNotDone) {
+      if (timeoutTimerRef.current) {
+        clearTimeout(timeoutTimerRef.current);
+      }
+      setShowTimeoutModal(false);
+      return;
+    }
+
+    resetInactivityTimer();
+
+    const handleInteraction = () => {
+      resetInactivityTimer();
+    };
+
+    const events = ['click', 'touchstart', 'keydown', 'mousemove', 'input', 'scroll'];
+    events.forEach(event => {
+      window.addEventListener(event, handleInteraction, { passive: true });
+    });
+
+    return () => {
+      if (timeoutTimerRef.current) {
+        clearTimeout(timeoutTimerRef.current);
+      }
+      events.forEach(event => {
+        window.removeEventListener(event, handleInteraction);
+      });
+    };
+  }, [step, paymentStatus, showTimeoutModal]);
 
   // Default Seller is defined for totem operations audit trail
   const systemSeller: User = currentUser || {
@@ -376,6 +517,29 @@ export default function PdvTotemModule() {
     return products.filter(p => p.active !== false && p.totemHabilitado !== false);
   }, [products]);
 
+  // Vitrine products: active, stock > 0, totem enabled, not deleted
+  const vitrineProductsToShow = useMemo(() => {
+    return products
+      .filter(p => p.active !== false && p.totemHabilitado !== false && !p.deleted && (p.stock !== undefined ? p.stock > 0 : true))
+      .slice(0, 10); // Between 6 and 12
+  }, [products]);
+
+  const activePaymentMethods = useMemo(() => {
+    return paymentMethods.filter(m => m.active && m.showInPDV);
+  }, [paymentMethods]);
+
+  const hasPixConfig = useMemo(() => {
+    return activePaymentMethods.some(m => m.type === 'pix' || m.name?.toLowerCase().includes('pix'));
+  }, [activePaymentMethods]);
+
+  const hasCardConfig = useMemo(() => {
+    return activePaymentMethods.some(m => m.type === 'card' || m.name?.toLowerCase().includes('cart') || m.name?.toLowerCase().includes('credit') || m.name?.toLowerCase().includes('debit'));
+  }, [activePaymentMethods]);
+
+  const hasMoneyConfig = useMemo(() => {
+    return activePaymentMethods.some(m => m.type === 'money' || m.name?.toLowerCase().includes('dinheiro') || m.name?.toLowerCase().includes('money'));
+  }, [activePaymentMethods]);
+
   // Categories extracted automatically from products list
   const productCategories = useMemo(() => {
     const list = new Set<string>();
@@ -448,7 +612,54 @@ export default function PdvTotemModule() {
     setSelectedProductDetails(null);
     setModalQuantity(1);
     setStep('start');
+    setShowStartOptions(false);
   };
+
+  // Inactivity Auto-Return Timer (60 seconds)
+  useEffect(() => {
+    // If we are already on the vitrine home, no need for inactivity monitoring
+    if (step === 'start' && !showStartOptions) {
+      return;
+    }
+
+    const isPaymentPending = paymentStatus !== 'idle' && paymentStatus !== 'cancelled' && paymentStatus !== 'done';
+    const skipTimeout = step === 'success' || isPaymentPending;
+
+    if (skipTimeout) {
+      return;
+    }
+
+    let timeoutId: NodeJS.Timeout;
+
+    const resetTimer = () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        console.log(`[PdvTotemModule-T${terminalId}] Kiosk automatically returned to Vitrine mode because of 60s inactivity.`);
+        startNewSession();
+      }, 60000); // 60 seconds
+    };
+
+    // Initialize timer on load or when state shifts
+    resetTimer();
+
+    // User interactions to reset inactivity countdown
+    const activityEvents = ['click', 'touchstart', 'keydown', 'mousemove', 'scroll', 'input'];
+    
+    const handleActivity = () => {
+      resetTimer();
+    };
+
+    activityEvents.forEach(event => {
+      window.addEventListener(event, handleActivity, { passive: true });
+    });
+
+    return () => {
+      if (timeoutId) clearTimeout(timeoutId);
+      activityEvents.forEach(event => {
+        window.removeEventListener(event, handleActivity);
+      });
+    };
+  }, [step, showStartOptions, paymentStatus, terminalId]);
 
   // Automated session recovery/return after timeout in success state
   useEffect(() => {
@@ -478,7 +689,17 @@ export default function PdvTotemModule() {
     const safePost = (msg: any) => {
       if (!active) return;
       try {
-        channel.postMessage(msg);
+        // Automatically inject terminalId into outgoing messages if a payload is present
+        const enrichedMsg = { ...msg };
+        if (enrichedMsg.payload) {
+          enrichedMsg.payload = {
+            terminalId,
+            ...enrichedMsg.payload
+          };
+        } else {
+          enrichedMsg.payload = { terminalId };
+        }
+        channel.postMessage(enrichedMsg);
       } catch (err) {
         console.warn('Kiosk BroadcastChannel failed to send (channel may be closed):', err);
       }
@@ -507,9 +728,47 @@ export default function PdvTotemModule() {
     channel.onmessage = (event) => {
       if (!active) return;
       const { type, payload } = event.data;
-      if (payload?.terminalId && Number(payload.terminalId) !== Number(terminalId)) {
+
+      // 1. "sync-state" is global for product/cashier database updates - no terminalId required.
+      if (type === 'sync-state') {
+        if (payload) {
+          useStore.setState({
+            currentCashier: payload.currentCashier,
+            products: payload.products
+          });
+        }
         return;
       }
+
+      // 2. These are sensitive/administrative/control commands. They require an explicit, matching terminalId.
+      const sensitiveCommands = [
+        'close-kiosk', 'close_customer_display', 'close_totem_control',
+        'reload-kiosk',
+        'reset-kiosk', 'totem_reset',
+        'totem-fullscreen-changed',
+        'totem-pix-approved', 'totem-payment-approved', 'payment_confirmed',
+        'totem-pix-refused', 'totem-payment-refused', 'payment_cancelled',
+        'request-totem-state',
+        'totem-state-sync', 'totem_state_sync'
+      ];
+
+      if (sensitiveCommands.includes(type)) {
+        if (!payload || payload.terminalId === undefined) {
+          console.warn(`[PdvTotemModule-T${terminalId}] Sensitive command '${type}' ignored: terminalId missing in payload.`);
+          return;
+        }
+        if (Number(payload.terminalId) !== Number(terminalId)) {
+          // Quietly ignore command intended for another terminal
+          return;
+        }
+      } else {
+        // Any other command: ignore if targeted to another terminal
+        if (payload?.terminalId && Number(payload.terminalId) !== Number(terminalId)) {
+          return;
+        }
+      }
+
+      // Executing commands, only for the validated matching terminal target
       if (type === 'close-kiosk' || type === 'close_customer_display' || type === 'close_totem_control') {
         window.close();
       } else if (type === 'reload-kiosk') {
@@ -543,23 +802,6 @@ export default function PdvTotemModule() {
             console.warn('Browser fullscreen not supported or failed:', e);
           }
         }
-      } else if (type === 'totem-second-screen-lock-changed') {
-        const isLocked = payload?.isLocked;
-        const isDesktopVal = typeof window !== 'undefined' && !!(window as any).electron;
-        if (isDesktopVal) {
-          const totemBridge = (window as any).electronAPI?.totem || (window as any).electron?.totem;
-          if (totemBridge) {
-            if (isLocked) {
-              if (totemBridge.lockSecondScreen) {
-                totemBridge.lockSecondScreen().catch((err: any) => console.error('Erro ao travar tela:', err));
-              }
-            } else {
-              if (totemBridge.unlockSecondScreen) {
-                totemBridge.unlockSecondScreen().catch((err: any) => console.error('Erro ao destravar tela:', err));
-              }
-            }
-          }
-        }
       } else if (type === 'totem-pix-approved' || type === 'totem-payment-approved' || type === 'payment_confirmed') {
         // Operator approved the payment!
         const finalSale = payload?.sale || lastSale;
@@ -582,13 +824,6 @@ export default function PdvTotemModule() {
           setPaymentStatus('idle');
           setErrorMessage('');
         }, 6000);
-      } else if (type === 'sync-state') {
-        if (payload) {
-          useStore.setState({
-            currentCashier: payload.currentCashier,
-            products: payload.products
-          });
-        }
       } else if (type === 'request-totem-state') {
         safePost({
           type: 'totem-state-sync',
@@ -654,7 +889,7 @@ export default function PdvTotemModule() {
         console.error('Error closing kiosk channel:', err);
       }
     };
-  }, [paymentStatus, lastSale, cart, selectedClient, tempSelectedClient, isAnonymous, clientSearchQuery, productSearch, selectedCategory, chosenMethod, cashDeposited, errorMessage, isRegisteringClient, newClientName, newClientPhone, newClientDocument, focusedField, selectedProductDetails, modalQuantity, step]);
+  }, [paymentStatus, lastSale, cart, selectedClient, tempSelectedClient, isAnonymous, clientSearchQuery, productSearch, selectedCategory, chosenMethod, cashDeposited, errorMessage, isRegisteringClient, newClientName, newClientPhone, newClientDocument, focusedField, selectedProductDetails, modalQuantity, step, terminalId, isControlMode]);
 
   const cartString = JSON.stringify(cart);
   const selectedClientString = JSON.stringify(selectedClient);
@@ -667,6 +902,7 @@ export default function PdvTotemModule() {
       channelRef.current.postMessage({
         type: 'totem-state-sync',
         payload: {
+          terminalId,
           cart,
           selectedClient,
           tempSelectedClient,
@@ -803,51 +1039,72 @@ export default function PdvTotemModule() {
   };
 
   // Add Item to cart with stock validation constraints and custom variations
-  const addToCart = (product: typeof products[0], quantityToAdd: number = 1, variation: string = '', customPrice?: number) => {
-    if (product.stock <= 0) {
+  const addToCart = (product: typeof products[0], quantityToAdd: number = 1, variationName: string = '', customPrice?: number, variationId?: string) => {
+    const activeVar = variationId && product.variations 
+      ? product.variations.find(v => v.id === variationId)
+      : null;
+
+    const availableStock = activeVar ? activeVar.stock : product.stock;
+
+    if (availableStock <= 0) {
       alert('Infelizmente este produto está sem estoque no momento.');
       return;
     }
 
-    const nameWithVariation = variation && variation !== 'Tradicional' && variation !== 'Padrão' && variation !== 'Normal'
-      ? `${product.name} (${variation})`
+    const nameWithVariation = variationName && variationName !== 'Tradicional' && variationName !== 'Padrão' && variationName !== 'Normal'
+      ? `${product.name} (${variationName})`
       : product.name;
 
-    const finalPrice = customPrice !== undefined ? customPrice : product.price;
+    const finalPrice = customPrice !== undefined ? customPrice : (activeVar?.price !== undefined ? activeVar.price : product.price);
 
     const finalProduct = {
       ...product,
       name: nameWithVariation,
-      price: finalPrice
+      price: finalPrice,
+      selectedVariationId: activeVar?.id || undefined,
+      selectedVariationName: activeVar?.name || undefined,
+      selectedVariationSku: activeVar?.sku || undefined
     };
 
     setCart(prev => {
-      const existing = prev.find(item => item.id === product.id && item.name === nameWithVariation);
+      const existing = prev.find(item => 
+        item.id === product.id && 
+        item.selectedVariationId === (activeVar?.id || undefined)
+      );
       if (existing) {
         const targetQty = existing.quantity + quantityToAdd;
-        if (targetQty > product.stock) {
-          alert(`Estoque máximo disponível (${product.stock}) atingido para este item.`);
+        if (targetQty > availableStock) {
+          alert(`Estoque máximo disponível (${availableStock}) atingido para este item.`);
           return prev.map(item => 
-            (item.id === product.id && item.name === nameWithVariation) ? { ...item, quantity: product.stock } : item
+            (item.id === product.id && item.selectedVariationId === (activeVar?.id || undefined)) 
+              ? { ...item, quantity: availableStock } 
+              : item
           );
         }
         return prev.map(item => 
-          (item.id === product.id && item.name === nameWithVariation) ? { ...item, quantity: targetQty } : item
+          (item.id === product.id && item.selectedVariationId === (activeVar?.id || undefined)) 
+            ? { ...item, quantity: targetQty } 
+            : item
         );
       }
-      return [...prev, { ...finalProduct, quantity: Math.min(quantityToAdd, product.stock) } as CartItem];
+      return [...prev, { ...finalProduct, quantity: Math.min(quantityToAdd, availableStock) } as CartItem];
     });
   };
 
-  const updateQuantity = (id: string, delta: number) => {
+  const updateQuantity = (id: string, delta: number, variationId?: string) => {
     const origProduct = products.find(p => p.id === id);
     if (!origProduct) return;
 
     setCart(prev => prev.map(item => {
-      if (item.id === id) {
+      if (item.id === id && item.selectedVariationId === variationId) {
         const targetQty = item.quantity + delta;
         if (targetQty <= 0) return item; // Handled by delete click
-        if (targetQty > origProduct.stock) {
+        
+        const availableStock = variationId && origProduct.variations
+          ? (origProduct.variations.find(v => v.id === variationId)?.stock ?? origProduct.stock)
+          : origProduct.stock;
+
+        if (targetQty > availableStock) {
           alert('Quantidade máxima em estoque atingida.');
           return item;
         }
@@ -857,8 +1114,8 @@ export default function PdvTotemModule() {
     }));
   };
 
-  const removeFromCart = (id: string) => {
-    setCart(prev => prev.filter(item => item.id !== id));
+  const removeFromCart = (id: string, variationId?: string) => {
+    setCart(prev => prev.filter(item => !(item.id === id && item.selectedVariationId === variationId)));
   };
 
   // Customer quick registration logic
@@ -1078,6 +1335,15 @@ export default function PdvTotemModule() {
 
   return (
     <div className="min-h-screen bg-[#070707] text-white flex flex-col relative select-none">
+      <style dangerouslySetInnerHTML={{ __html: `
+        body, html, #root, .min-h-screen {
+          -webkit-app-region: no-drag !important;
+          user-select: none !important;
+        }
+        button, input, select, a, [role="button"], textarea {
+          -webkit-app-region: no-drag !important;
+        }
+      `}} />
       
       {isControlMode && (
         <div className="bg-indigo-650 border-b border-indigo-500 py-2.5 px-4 text-center text-[10px] font-black uppercase tracking-wider flex items-center justify-center gap-2 select-none z-50 text-white animate-pulse shrink-0">
@@ -1165,7 +1431,7 @@ export default function PdvTotemModule() {
             )}
 
             <button 
-              onClick={startNewSession}
+              onClick={() => setShowCancelModal(true)}
               className="text-[8px] font-mono bg-red-500/10 border border-red-500/20 px-3 py-1.5 rounded-lg uppercase font-black text-red-500 hover:bg-red-500/20 active:scale-95 transition-all cursor-pointer"
             >
               Cancelar Atendimento
@@ -1178,8 +1444,158 @@ export default function PdvTotemModule() {
       <main className="flex-1 md:overflow-hidden overflow-y-auto relative flex flex-col">
         <AnimatePresence mode="wait">
 
-          {/* STEP 1: START SCREEN */}
-          {step === 'start' && (
+          {/* STEP 1: START SCREEN - VITRINE MODE */}
+          {step === 'start' && !showStartOptions && (
+            <motion.div 
+              key="vitrine"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="flex-1 flex flex-col justify-between py-8 px-6 max-w-6xl mx-auto w-full relative select-none cursor-pointer"
+              onClick={() => setShowStartOptions(true)}
+            >
+              {/* Decorative radial neon glow background */}
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.03),_transparent_60%)] pointer-events-none" />
+
+              {/* Dynamic Header: Brand identity */}
+              <div className="flex flex-col items-center text-center mt-6 z-10 space-y-4">
+                {company?.logo ? (
+                  <img 
+                    src={company.logo} 
+                    alt={company.name || 'Store'} 
+                    className="h-20 max-w-[280px] object-contain drop-shadow-[0_0_15px_rgba(255,255,255,0.05)]"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <h1 className="text-4xl font-extrabold text-[#ffffff] tracking-wider uppercase font-mono drop-shadow-[0_0_20px_rgba(16,185,129,0.15)]">
+                    {company?.name || 'NEXA STORE'}
+                  </h1>
+                )}
+                {company?.slogan && (
+                  <p className="text-[10px] font-mono uppercase tracking-[0.25em] text-zinc-500 font-bold max-w-md">
+                    {company.slogan}
+                  </p>
+                )}
+              </div>
+
+              {/* Interactive Call to Action Block */}
+              <div className="my-8 text-center z-10 space-y-3">
+                <div className="inline-flex items-center gap-2.5 px-6 py-3 bg-emerald-500/10 border border-emerald-500/20 rounded-full animate-pulse shadow-[0_0_20px_rgba(16,185,129,0.05)]">
+                  <div className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgb(52,211,153)]" />
+                  <span className="text-lg font-black text-white uppercase tracking-[0.15em] font-mono">
+                    Toque para começar
+                  </span>
+                </div>
+                <p className="text-xs text-zinc-400 font-medium uppercase tracking-wider max-w-lg mx-auto leading-relaxed">
+                  Escolha seus produtos e finalize seu pedido no autoatendimento.
+                </p>
+              </div>
+
+              {/* Products Showcase Vitrine */}
+              <div className="flex-1 flex flex-col justify-center min-h-[320px] max-w-5xl mx-auto w-full z-10 my-4">
+                {vitrineProductsToShow.length > 0 ? (
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4">
+                    {vitrineProductsToShow.map((p) => (
+                      <div 
+                        key={p.id}
+                        className="bg-[#0c0c0c] border border-white/5 rounded-2xl p-3 flex flex-col justify-between h-[16rem] transition-all hover:border-emerald-500/30 shadow-[0_4px_12px_rgba(0,0,0,0.5)] group relative overflow-hidden"
+                      >
+                        {/* Background light gradient on hover */}
+                        <div className="absolute inset-0 bg-gradient-to-t from-emerald-500/[0.01] to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none" />
+
+                        {/* Product Image or Custom Elegante Placeholder */}
+                        <div className="h-28 bg-gradient-to-b from-[#121212] to-[#040404] rounded-xl border border-white/5 overflow-hidden flex items-center justify-center relative">
+                          {p.image ? (
+                            <img 
+                              src={p.image} 
+                              alt={p.name}
+                              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                              referrerPolicy="no-referrer"
+                            />
+                          ) : (
+                            <div className="w-10 h-10 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center text-emerald-400">
+                              <span className="text-xs uppercase font-extrabold">{p.name.slice(0, 2)}</span>
+                            </div>
+                          )}
+
+                          {/* Glowing Neon "Disponível" badge on Card */}
+                          <div className="absolute bottom-2 right-2 px-1.5 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-500/20 text-[6.5px] font-black uppercase tracking-wider text-emerald-400 flex items-center gap-1 shadow-md">
+                            <span className="w-1 h-1 rounded-full bg-emerald-400 animate-ping" />
+                            Disponível
+                          </div>
+                        </div>
+
+                        {/* Text and Pricing metadata */}
+                        <div className="space-y-1 my-2">
+                          <span className="text-[11px] font-extrabold text-white line-clamp-1 uppercase leading-tight group-hover:text-emerald-400 transition-colors">
+                            {p.name}
+                          </span>
+                          <span className="text-[7.5px] font-mono text-zinc-500 uppercase tracking-wider block">
+                            {p.category || 'Geral'}
+                          </span>
+                        </div>
+
+                        <div className="border-t border-white/5 pt-2 mt-auto flex items-center justify-between">
+                          <span className="text-xs font-black text-emerald-400 font-mono tracking-wide">
+                            R$ {p.price.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                          </span>
+                          <span className="text-[7px] font-bold text-zinc-500 uppercase tracking-widest bg-white/5 px-1.5 py-0.5 rounded border border-white/5">
+                            QTD: {p.stock}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  // Fallback sem produtos: Maintain center alignment and corporate logo style gracefully
+                  <div className="text-center py-10 space-y-3">
+                    <div className="mx-auto w-16 h-16 rounded-2xl bg-zinc-900 border border-white/5 flex items-center justify-center text-zinc-500">
+                      <ShoppingBag className="w-6 h-6" />
+                    </div>
+                    <p className="text-xs text-zinc-500 uppercase tracking-widest font-mono">Nenhum produto cadastrado com estoque disponível no momento</p>
+                  </div>
+                )}
+              </div>
+
+              {/* Acceptable Payment Methods bottom visualizer */}
+              <div className="mt-8 flex flex-col sm:flex-row items-center justify-between border-t border-white/5 pt-6 z-10 max-w-5xl mx-auto w-full">
+                <div className="flex items-center gap-1.5 text-zinc-500 font-mono text-[8px] uppercase tracking-[0.2em] mb-4 sm:mb-0">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  Terminal: {terminalId} • Lukasfe Systems Industrial Ltda
+                </div>
+
+                <div className="flex items-center gap-2 bg-[#080808] border border-white/5 px-4 py-2.5 rounded-2xl shadow-lg">
+                  <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-wider mr-2">Formas de Pagamento:</span>
+                  {(hasPixConfig || hasCardConfig || hasMoneyConfig) ? (
+                    <div className="flex items-center gap-2">
+                      {hasPixConfig && (
+                        <div className="flex items-center gap-1 bg-emerald-500/5 border border-emerald-500/15 px-2.5 py-1 rounded-lg text-[8px] font-black uppercase text-emerald-400 tracking-wider">
+                          <QrCode className="w-3 h-3" /> Pix
+                        </div>
+                      )}
+                      {hasCardConfig && (
+                        <div className="flex items-center gap-1 bg-blue-500/5 border border-blue-500/15 px-2.5 py-1 rounded-lg text-[8px] font-black uppercase text-blue-400 tracking-wider">
+                          <CreditCard className="w-3 h-3" /> Cartão
+                        </div>
+                      )}
+                      {hasMoneyConfig && (
+                        <div className="flex items-center gap-1 bg-amber-500/5 border border-amber-500/15 px-2.5 py-1 rounded-lg text-[8px] font-black uppercase text-amber-400 tracking-wider">
+                          <Wallet className="w-3 h-3" /> Dinheiro
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <span className="text-[8px] font-black uppercase tracking-wider text-zinc-400">
+                      Pagamento Assistido pelo Operador
+                    </span>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {/* STEP 1 (SELECTION STATE): CHOICE FOR CLIENT IDENTIFICATION / WALK-IN */}
+          {step === 'start' && showStartOptions && (
             <motion.div 
               key="start"
               initial={{ opacity: 0 }}
@@ -1191,10 +1607,19 @@ export default function PdvTotemModule() {
               
               <div className="text-center space-y-4 mb-12">
                 <div className="mx-auto w-24 h-24 bg-emerald-500/10 border border-emerald-500/25 rounded-[2rem] flex items-center justify-center text-emerald-400 shadow-2xl">
-                  <Tablet className="w-10 h-10 animate-bounce" />
+                  {company?.logo ? (
+                    <img 
+                      src={company.logo} 
+                      alt="Logo" 
+                      className="w-14 h-14 object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  ) : (
+                    <Tablet className="w-10 h-10 animate-bounce" />
+                  )}
                 </div>
                 <div className="space-y-1">
-                  <h1 className="text-2xl font-black text-white tracking-widest uppercase font-mono">Totem Autoatendimento</h1>
+                  <h1 className="text-2xl font-black text-white tracking-widest uppercase font-mono">{company?.name || 'Totem Autoatendimento'}</h1>
                   <p className="text-[10px] font-bold text-zinc-400 uppercase tracking-[0.2em]">Encontre seus produtos, pague e retire na hora</p>
                 </div>
               </div>
@@ -1266,7 +1691,19 @@ export default function PdvTotemModule() {
 
               </div>
 
-              <div className="mt-16 text-center">
+              {/* Floating Return Button to go back to beautiful Vitrine mode */}
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setShowStartOptions(false);
+                }}
+                className="mt-12 flex items-center gap-2 px-6 py-3 border border-white/5 bg-white/5 hover:bg-white/10 rounded-2xl text-[9px] font-black uppercase text-zinc-400 tracking-widest transition-all hover:text-white hover:border-white/15 active:scale-95 cursor-pointer shadow-lg"
+              >
+                <ArrowLeft className="w-4 h-4 text-emerald-400" />
+                Voltar para a vitrine
+              </button>
+
+              <div className="mt-8 text-center">
                 <span className="text-[8px] font-mono text-zinc-600 uppercase tracking-[0.3em]">Hardware Integrado • Lukasfe Systems Industrial Ltda</span>
               </div>
             </motion.div>
@@ -1952,7 +2389,7 @@ export default function PdvTotemModule() {
                     ) : (
                       cart.map(item => (
                         <div 
-                          key={item.id}
+                          key={item.id + (item.selectedVariationId ? '-' + item.selectedVariationId : '')}
                           className="bg-[#121212] border border-white/5 rounded-xl p-2.5 flex items-center justify-between gap-2"
                         >
                           <div className="flex-1 min-w-0">
@@ -1966,8 +2403,8 @@ export default function PdvTotemModule() {
                           <div className="flex items-center gap-1 shrink-0 scale-90">
                             <button 
                               onClick={() => {
-                                if (item.quantity === 1) removeFromCart(item.id);
-                                else updateQuantity(item.id, -1);
+                                if (item.quantity === 1) removeFromCart(item.id, item.selectedVariationId);
+                                else updateQuantity(item.id, -1, item.selectedVariationId);
                               }}
                               className="w-6 h-6 border border-white/5 bg-white/5 hover:bg-white/10 rounded-md flex items-center justify-center text-white/80 active:scale-95"
                             >
@@ -1977,7 +2414,7 @@ export default function PdvTotemModule() {
                               {item.quantity}
                             </span>
                             <button 
-                              onClick={() => updateQuantity(item.id, 1)}
+                              onClick={() => updateQuantity(item.id, 1, item.selectedVariationId)}
                               className="w-6 h-6 border border-white/5 bg-white/5 hover:bg-white/10 rounded-md flex items-center justify-center text-white/80 active:scale-95"
                             >
                               <Plus className="w-3 h-3" />
@@ -2298,81 +2735,103 @@ export default function PdvTotemModule() {
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
               exit={{ opacity: 0, scale: 0.95 }}
-              className="flex-1 max-w-4xl mx-auto w-full p-6 flex flex-col lg:flex-row gap-6 justify-center items-center lg:h-full overflow-y-auto"
+              className="flex-1 max-w-2xl mx-auto w-full p-8 flex flex-col justify-center items-center gap-8 text-center"
             >
               
-              {/* Left Side: Glowing Checkout Banner */}
-              <div className="flex-1 text-center lg:text-left space-y-6">
-                <div className="inline-flex w-16 h-16 bg-emerald-500/15 border border-emerald-500/20 rounded-[1.5rem] items-center justify-center text-emerald-400 shadow-2xl shadow-emerald-500/10">
-                  <CheckCircle className="w-8 h-8 animate-pulse" />
+              {/* Centered Success Visual Elements */}
+              <div className="space-y-4 max-w-lg w-full flex flex-col items-center">
+                <div className="inline-flex w-20 h-20 bg-emerald-500/10 border border-emerald-500/25 rounded-[2rem] items-center justify-center text-emerald-400 shadow-xl shadow-emerald-500/5">
+                  <CheckCircle className="w-10 h-10 animate-pulse text-emerald-450" />
                 </div>
 
-                <div className="space-y-2 animate-fade-in">
-                  <span className="text-[9px] font-mono text-emerald-400 font-black uppercase tracking-[0.3em] block">Pagamento Confirmado</span>
-                  <h1 className="text-3xl font-black text-white uppercase tracking-wider font-mono">Pedido Gerado com Sucesso!</h1>
-                  
-                  <div className="border border-white/5 bg-black/40 rounded-3xl p-6 text-center max-w-md mx-auto lg:mx-0">
-                    <span className="text-[8px] font-mono uppercase text-zinc-500 tracking-wider block mb-1">Seu Número de Pedido</span>
-                    <span className="text-4xl font-extrabold text-white tracking-widest font-mono font-bold">
-                      #{lastSale.orderNumber}
-                    </span>
+                <div className="space-y-2 text-center">
+                  <span className="text-[10px] font-mono text-emerald-400 font-extrabold uppercase tracking-[0.3em] block">Autoatendimento Finalizado</span>
+                  <h1 className="text-3xl font-black text-white uppercase tracking-wider font-mono">Pedido Enviado Para Separação!</h1>
+                </div>
+              </div>
+
+              {/* Order Number Big Display */}
+              <div className="bg-zinc-950/65 border border-white/5 rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative space-y-6">
+                <div className="absolute top-0 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-emerald-500 text-black font-mono font-black text-[10px] px-4 py-1.5 rounded-full uppercase tracking-widest shadow-lg shadow-emerald-500/10">
+                  Senha do Painel
+                </div>
+                
+                <div className="text-5xl font-black text-emerald-400 tracking-wider font-mono py-2">
+                  #{lastSale.orderNumber}
+                </div>
+
+                {/* Micro Native Receipt Details */}
+                <div className="border-t border-b border-white/5 py-4 space-y-3 text-left">
+                  <div className="flex justify-between text-[10px] uppercase font-bold text-zinc-550">
+                    <span>Itens Comprados</span>
+                    <span>Subtotal</span>
                   </div>
-
-                  {lastSale.change !== undefined && lastSale.change > 0 && (
-                    <div className="border border-emerald-500/20 bg-emerald-500/5 rounded-3xl p-5 text-center max-w-md mx-auto lg:mx-0 animate-pulse">
-                      <span className="text-[8px] font-mono uppercase text-emerald-400 tracking-wider block mb-0.5 font-bold">Seu Troco a Receber</span>
-                      <span className="text-3xl font-black text-white font-mono font-bold">
-                        R$ {lastSale.change.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                      </span>
-                      <p className="text-[7.5px] text-zinc-400 uppercase mt-1 leading-normal font-medium">
-                        Retire suas cédulas e moedas diretamente com o operador do terminal!
-                      </p>
-                    </div>
-                  )}
-
-                  <p className="text-[10px] font-black text-emerald-300 uppercase tracking-wide leading-relaxed pt-2">
-                    Aguarde a separação do seu pedido.
-                  </p>
-                  
-                  <p className="text-[8.5px] text-zinc-500 uppercase leading-relaxed max-w-xs block mx-auto lg:mx-0">
-                    * O seu pedido já foi enviado diretamente para a nossa equipe de separadores na triagem técnica!
-                  </p>
-                </div>
-
-                {/* Auto return progress countdown bar */}
-                <div className="bg-zinc-900/40 rounded-2xl p-4 border border-white/5 space-y-2 max-w-md">
-                  <span className="text-[8px] font-mono uppercase text-zinc-500 tracking-widest block">Retornando à Tela Inicial</span>
-                  <div className="flex items-center gap-3">
-                    <span className="text-[10px] font-black text-emerald-400 font-mono">{successCountdown}s</span>
-                    <div className="flex-1 bg-white/5 h-1.5 rounded-full overflow-hidden">
-                      <motion.div 
-                        initial={{ width: "100%" }}
-                        animate={{ width: "0%" }}
-                        transition={{ duration: 10, ease: "linear" }}
-                        className="h-full bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.5)]"
-                      />
-                    </div>
+                  <div className="max-h-32 overflow-y-auto custom-scrollbar space-y-1.5 pr-1 font-mono text-[10.5px]">
+                    {lastSale.items && lastSale.items.map((item: any, idx: number) => (
+                      <div key={idx} className="flex justify-between items-center text-zinc-300">
+                        <span className="truncate max-w-[280px] uppercase font-medium">{item.name} <strong className="text-emerald-400 font-bold ml-1">x{item.quantity}</strong></span>
+                        <span className="text-white font-bold">R$ {(item.price * item.quantity).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-between items-center pt-2 border-t border-white/5 text-xs">
+                    <span className="text-zinc-400 font-bold uppercase text-[10px]">Valor Total:</span>
+                    <strong className="text-emerald-400 font-mono font-black text-sm">
+                      R$ {lastSale.total.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                    </strong>
                   </div>
                 </div>
 
-                <button
-                  onClick={startNewSession}
-                  className="w-full max-w-sm py-4 bg-white/5 hover:bg-white/10 border border-white/5 rounded-2xl text-[9px] font-black uppercase tracking-widest text-[#eeeeee] transition-all active:scale-95 cursor-pointer text-center"
-                >
-                  Confirmar e Voltar Agora
-                </button>
+                <div className="flex flex-col sm:flex-row justify-between text-[11px] gap-2 pt-1 uppercase text-zinc-400 font-bold tracking-wide">
+                  <div className="flex items-center gap-1.5 justify-center sm:justify-start">
+                    <span>Forma:</span>
+                    <strong className="text-white font-black">{lastSale.paymentMethodName || 'Outro'}</strong>
+                  </div>
+                  <div className="flex items-center gap-1.5 justify-center sm:justify-end">
+                    <span>Cliente:</span>
+                    <strong className="text-white font-black">
+                      {lastSale.clientId ? (clients.find(c => c.id === lastSale.clientId)?.name || 'Consumidor Final') : 'Consumidor Final'}
+                    </strong>
+                  </div>
+                </div>
               </div>
 
-              {/* Right Side: Virtual Thermal PDF Metadata Cupom */}
-              <div className="w-full md:w-96 shrink-0 border border-white/5 rounded-[2rem] overflow-hidden shadow-2xl flex flex-col h-[520px] bg-zinc-950">
-                <CanonicalDocumentPreview
-                  documentType="reciboTermico"
-                  payload={mapToReciboPayload(lastSale)}
-                  paperSize={receiptConfig?.paperSize || '80mm'}
-                  initialZoom="fit"
-                  initialShowGuides={false}
-                />
+              {/* Change/Troco segment */}
+              {lastSale.change !== undefined && lastSale.change > 0 && (
+                <div className="border border-emerald-500/20 bg-emerald-500/5 rounded-[2rem] p-6 text-center max-w-lg w-full animate-pulse space-y-1">
+                  <span className="text-[9px] font-mono uppercase text-emerald-400 tracking-wider block font-bold">Seu Troco a Receber</span>
+                  <span className="text-3xl font-black text-white font-mono font-bold">
+                    R$ {lastSale.change.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                  </span>
+                  <p className="text-[8px] text-zinc-400 uppercase leading-normal font-bold">
+                    Retire suas cédulas e moedas diretamente com o operador do terminal!
+                  </p>
+                </div>
+              )}
+
+              {/* Auto return progress countdown bar */}
+              <div className="bg-zinc-950/40 rounded-3xl p-5 border border-white/5 space-y-2.5 w-full max-w-lg">
+                <span className="text-[9px] font-mono uppercase text-zinc-400 tracking-widest block font-bold">Retornando ao Menu Principal</span>
+                <div className="flex items-center gap-4">
+                  <span className="text-xs font-black text-emerald-400 font-mono">{successCountdown}s</span>
+                  <div className="flex-1 bg-white/5 h-2 rounded-full overflow-hidden">
+                    <motion.div 
+                      initial={{ width: "100%" }}
+                      animate={{ width: "0%" }}
+                      transition={{ duration: 10, ease: "linear" }}
+                      className="h-full bg-emerald-500 shadow-[0_0_8px_rgba(52,211,153,0.5)]"
+                    />
+                  </div>
+                </div>
               </div>
+
+              {/* Instant confirm & exit trigger button */}
+              <button
+                onClick={startNewSession}
+                className="w-full max-w-lg py-5 bg-emerald-500 hover:bg-emerald-400 text-black rounded-2xl text-[10px] font-black uppercase tracking-widest hover:shadow-[0_0_20px_rgba(16,185,129,0.25)] transition-all active:scale-97 cursor-pointer text-center font-bold"
+              >
+                Concluir e Voltar ao Início
+              </button>
 
             </motion.div>
           )}
@@ -2381,188 +2840,434 @@ export default function PdvTotemModule() {
 
         {/* DETAILS CONFIRMATION MODAL */}
         {selectedProductDetails && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.05),_transparent_60%)] pointer-events-none" />
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(16,185,129,0.06),_transparent_60%)] pointer-events-none" />
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
               animate={{ opacity: 1, scale: 1 }}
-              className="w-full max-w-lg bg-[#0e0e0e] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl relative text-left"
+              className="w-full max-w-4xl bg-[#0b0b0b] border border-white/10 rounded-[2.5rem] p-6 md:p-8 space-y-6 shadow-2xl relative text-left my-auto"
             >
               {/* Close Button top right */}
               <button
                 onClick={() => setSelectedProductDetails(null)}
-                className="absolute top-6 right-6 w-10 h-10 border border-white/5 bg-white/5 hover:bg-white/10 rounded-full flex items-center justify-center text-white/50 hover:text-white"
+                className="absolute top-6 right-6 w-12 h-12 border border-white/5 bg-white/5 hover:bg-white/10 active:scale-90 rounded-full flex items-center justify-center text-white/70 hover:text-white transition-all cursor-pointer z-10 shadow-lg"
               >
-                <XIcon className="w-4 h-4" />
+                <XIcon className="w-5 h-5" />
               </button>
 
-              {/* Header info */}
-              <div className="space-y-1">
-                <span className="text-[8px] font-mono text-emerald-400 tracking-widest uppercase block animate-pulse">Detalhes do Item</span>
-                <h3 className="text-xl font-black text-white uppercase tracking-tight pr-10">{selectedProductDetails.name}</h3>
-                <span className="text-[9px] font-mono text-zinc-500 uppercase tracking-widest block">Código: {selectedProductDetails.code}</span>
-              </div>
-
-              {/* Big Preview Area */}
-              <div className="h-44 bg-[#0a0a0a] rounded-2xl border border-white/5 overflow-hidden flex items-center justify-center relative">
-                {modalImagesList.length > 0 ? (
-                  <img
-                    src={modalImagesList[activeImageIndex] || modalImagesList[0]}
-                    alt={selectedProductDetails.name}
-                    className="w-full h-full object-contain p-2"
-                    referrerPolicy="no-referrer"
-                  />
-                ) : (
-                  <div className="w-16 h-16 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center text-emerald-400">
-                    <ShoppingBag className="w-8 h-8" />
-                  </div>
-                )}
-                {selectedProductDetails.category && (
-                  <span className="absolute bottom-3 left-3 px-2 py-1 bg-black/75 border border-white/5 text-[7px] text-white/70 font-mono tracking-widest uppercase rounded">
-                    {selectedProductDetails.category}
-                  </span>
-                )}
-                <span className="absolute bottom-3 right-3 px-2 py-1 bg-emerald-500/10 border border-emerald-500/20 text-[7px] text-emerald-400 font-mono tracking-widest uppercase rounded font-bold">
-                  Estoque: {selectedProductDetails.stock} disponível
-                </span>
-              </div>
-
-              {/* Miniature Thumbnails Gallery (Shopee Style) */}
-              {modalImagesList.length > 1 && (
-                <div className="flex items-center gap-2 overflow-x-auto py-1 custom-scrollbar shrink-0 justify-center">
-                  {modalImagesList.map((imgUrl, index) => (
-                    <button
-                      key={index}
-                      type="button"
-                      onClick={() => setActiveImageIndex(index)}
-                      className={`w-12 h-12 rounded-lg border overflow-hidden transition-all bg-[#0a0a0a] relative shrink-0 active:scale-95 ${
-                        activeImageIndex === index 
-                          ? "border-emerald-500 ring-2 ring-emerald-500/30 scale-105" 
-                          : "border-white/10 hover:border-white/30"
-                      }`}
-                    >
-                      <img 
-                        src={imgUrl} 
-                        alt={`Miniatura ${index + 1}`} 
-                        className="w-full h-full object-cover" 
+              {/* Grid Layout: Left Column (Image & Gallery), Right Column (Specs & Action) */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start pt-2">
+                
+                {/* Left Column: Grande Imagem e Galeria */}
+                <div className="lg:col-span-6 flex flex-col space-y-4">
+                  {/* Big Preview Area with Swipe Support and Touch Arrows */}
+                  <div 
+                    className="relative w-full aspect-square sm:aspect-[4/3] md:aspect-[4/3] lg:aspect-square bg-gradient-to-b from-[#0c0c0c] to-[#040404] rounded-3xl border border-white/5 overflow-hidden flex items-center justify-center select-none"
+                    onTouchStart={handleTouchStart}
+                    onTouchEnd={handleTouchEnd}
+                  >
+                    {viewing3D && selectedProductDetails.file3d ? (
+                      <ThreeDViewer 
+                        file={selectedProductDetails.file3d} 
+                        onClose={() => setViewing3D(false)}
+                      />
+                    ) : modalImagesList.length > 0 ? (
+                      <img
+                        src={modalImagesList[activeImageIndex] || modalImagesList[0]}
+                        alt={selectedProductDetails.name}
+                        className="w-full h-full object-contain p-4 transition-all duration-300 pointer-events-none"
                         referrerPolicy="no-referrer"
                       />
-                      {index === 0 && (
-                        <span className="absolute bottom-0 inset-x-0 bg-emerald-500/85 text-[6px] font-black uppercase text-black text-center py-0.5 leading-none">
-                          Principal
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
+                    ) : (
+                      <div className="w-20 h-20 rounded-full bg-emerald-500/5 border border-emerald-500/10 flex items-center justify-center text-emerald-400">
+                        <ShoppingBag className="w-10 h-10" />
+                      </div>
+                    )}
 
-              {/* Sabores & Variações Section */}
-              <div className="space-y-2.5 border-t border-white/5 pt-4">
-                <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest block">Seleção de Sabor / Variação</span>
-                <div className="flex flex-wrap gap-2">
-                  {(
-                    selectedProductDetails.category?.toLowerCase().includes('cerveja') || 
-                    selectedProductDetails.category?.toLowerCase().includes('chope') || 
-                    selectedProductDetails.category?.toLowerCase().includes('refrigerante') ||
-                    selectedProductDetails.category?.toLowerCase().includes('suco') ||
-                    selectedProductDetails.category?.toLowerCase().includes('refri') ||
-                    selectedProductDetails.category?.toLowerCase().includes('bebida')
-                      ? ['Normal', 'Gelado (Trincando)', 'Sem Gelo', 'Com Gelo e Limão']
-                      : selectedProductDetails.category?.toLowerCase().includes('pizza') || 
-                        selectedProductDetails.category?.toLowerCase().includes('pastel') || 
-                        selectedProductDetails.category?.toLowerCase().includes('doce') || 
-                        selectedProductDetails.category?.toLowerCase().includes('café') ||
-                        selectedProductDetails.category?.toLowerCase().includes('hambú')
-                        ? ['Tradicional', 'Gourmet (+ R$ 4,00)', 'Sabor Chocolate', 'Sabor Morango', 'Zero Açúcar']
-                        : ['Padrão', 'Premium (+ R$ 5,00)', 'Edição Especial', 'Embalagem Presente']
-                  ).map((sabor) => {
-                    const isSelected = selectedSabor === sabor;
-                    return (
-                      <button
-                        key={sabor}
-                        type="button"
-                        onClick={() => setSelectedSabor(sabor)}
-                        className={`px-3 py-1.5 rounded-xl border text-[9px] uppercase tracking-wider font-black transition-all cursor-pointer active:scale-95 ${
-                          isSelected
-                            ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 font-black shadow-[0_0_10px_rgba(16,185,129,0.15)]"
-                            : "bg-black/40 border-white/5 text-white/40 hover:text-white/60 hover:border-white/10"
-                        }`}
-                      >
-                        {sabor}
-                      </button>
-                    );
-                  })}
+                    {/* Touch Area Overlay controls if there are multiple images */}
+                    {!viewing3D && modalImagesList.length > 1 && (
+                      <>
+                        {/* Left Chevron arrow */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveImageIndex(prev => (prev - 1 + modalImagesList.length) % modalImagesList.length);
+                          }}
+                          className="absolute left-3 w-11 h-11 bg-black/60 border border-white/10 hover:bg-black/90 active:scale-90 text-white rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg"
+                        >
+                          <ChevronLeft className="w-6 h-6 text-emerald-400" />
+                        </button>
+
+                        {/* Right Chevron arrow */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setActiveImageIndex(prev => (prev + 1) % modalImagesList.length);
+                          }}
+                          className="absolute right-3 w-11 h-11 bg-black/60 border border-white/10 hover:bg-black/90 active:scale-90 text-white rounded-full flex items-center justify-center transition-all cursor-pointer shadow-lg"
+                        >
+                          <ChevronRight className="w-6 h-6 text-emerald-400" />
+                        </button>
+
+                        {/* Bullet Dot indicators */}
+                        <div className="absolute bottom-4 inset-x-0 flex items-center justify-center gap-1.5 z-10 pointer-events-none">
+                          {modalImagesList.map((_, idx) => (
+                            <div 
+                              key={idx}
+                              className={`h-2 rounded-full transition-all duration-300 ${
+                                activeImageIndex === idx 
+                                  ? "w-6 bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.5)]" 
+                                  : "w-2 bg-white/20"
+                              }`}
+                            />
+                          ))}
+                        </div>
+                      </>
+                    )}
+
+                    {/* Badge showing available stock */}
+                    <span className="absolute top-4 left-4 px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-[8px] text-emerald-400 font-mono tracking-widest uppercase rounded-full font-bold shadow-md">
+                      Estoque: {selectedProductDetails.stock} DISPONÍVEL
+                    </span>
+                  </div>
+
+                  {/* Miniature Thumbnails Gallery (Shopee Style) */}
+                  {(modalImagesList.length > 1 || selectedProductDetails.file3d) && (
+                    <div className="flex items-center gap-2.5 overflow-x-auto py-1.5 px-0.5 custom-scrollbar shrink-0 justify-center">
+                      {modalImagesList.map((imgUrl, index) => (
+                        <button
+                          key={index}
+                          type="button"
+                          onClick={() => {
+                            setActiveImageIndex(index);
+                            setViewing3D(false);
+                          }}
+                          className={`w-14 h-14 rounded-xl border-2 overflow-hidden transition-all bg-[#0a0a0a] relative shrink-0 active:scale-95 ${
+                            !viewing3D && activeImageIndex === index 
+                              ? "border-emerald-500 ring-2 ring-emerald-500/20 scale-105 shadow-[0_0_12px_rgba(16,185,129,0.1)]" 
+                              : "border-white/5 hover:border-white/20"
+                          }`}
+                        >
+                          <img 
+                            src={imgUrl} 
+                            alt={`Miniatura ${index + 1}`} 
+                            className="w-full h-full object-cover" 
+                            referrerPolicy="no-referrer"
+                          />
+                          {index === 0 && (
+                            <span className="absolute bottom-0 inset-x-0 bg-emerald-500/90 text-[5.5px] font-black uppercase text-black text-center py-0.5 leading-none font-bold">
+                              Principal
+                            </span>
+                          )}
+                        </button>
+                      ))}
+
+                      {/* Optional [Ver em 3D] button at the very end of images list */}
+                      {selectedProductDetails.file3d && (
+                        <button
+                          type="button"
+                          onClick={() => setViewing3D(true)}
+                          className={`w-14 h-14 rounded-xl border-2 transition-all shrink-0 active:scale-95 flex flex-col items-center justify-center gap-1 cursor-pointer ${
+                            viewing3D 
+                              ? "bg-cyan-500/15 border-cyan-500 text-cyan-400 font-black shadow-[0_0_12px_rgba(6,182,212,0.25)] ring-2 ring-cyan-500/20 scale-105" 
+                              : "bg-black/40 border-white/5 text-zinc-400 hover:text-white hover:border-white/12"
+                          }`}
+                          title="Ver visualização 3D do produto"
+                        >
+                          <Layers className="w-5 h-5 text-cyan-400" />
+                          <span className="text-[6.5px] font-black uppercase tracking-wider">Ver em 3D</span>
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Right Column: Descrição, Variações, Preço e Controles de Qtd */}
+                <div className="lg:col-span-6 flex flex-col justify-between space-y-6 self-stretch">
+                  
+                  {/* Title & Metadata */}
+                  <div className="space-y-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[9px] font-black text-emerald-400 uppercase tracking-[0.2em] bg-emerald-500/5 px-2.5 py-1 rounded-md border border-emerald-500/15">
+                        {selectedProductDetails.category || 'Geral'}
+                      </span>
+                      <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-widest bg-white/5 border border-white/5 px-2.5 py-1 rounded-md">
+                        CÓDIGO: {selectedProductDetails.code}
+                      </span>
+                    </div>
+
+                    <h3 className="text-2xl font-black text-white uppercase tracking-tight leading-tight pt-1">
+                      {selectedProductDetails.name}
+                    </h3>
+                  </div>
+
+                  {/* Elegant Fallback Description Section */}
+                  <div className="space-y-1.5 border-t border-white/5 pt-4">
+                    <span className="text-[8.5px] font-black text-zinc-500 uppercase tracking-[0.15em] block">Descrição do Produto</span>
+                    <p className="text-xs text-zinc-400 font-medium leading-relaxed uppercase tracking-wider max-h-24 overflow-y-auto custom-scrollbar pr-1">
+                      {selectedProductDetails.catalogDescription || selectedProductDetails.notes || "Sem descrição cadastrada"}
+                    </p>
+                  </div>
+
+                   {/* Sabores & Variações Section */}
+                    {selectedProductDetails.variations && selectedProductDetails.variations.length === 1 ? (
+                      <div className="space-y-1.5 border-t border-white/5 pt-4">
+                        <span className="text-[8.5px] font-mono text-zinc-500 uppercase tracking-widest block">Variação</span>
+                        <div className="px-3.5 py-3 rounded-xl border border-emerald-500/30 bg-emerald-500/5 text-white flex items-center justify-between">
+                          <span className="text-xs font-bold uppercase text-emerald-400">
+                            {selectedProductDetails.variations[0].name}
+                          </span>
+                          <span className="text-[9px] font-mono font-medium text-zinc-500 bg-black/40 px-2 py-1 rounded">
+                            {selectedProductDetails.variations[0].stock} un
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5 border-t border-white/5 pt-4">
+                        <span className="text-[8.5px] font-mono text-zinc-500 uppercase tracking-widest block">Seleção de Sabor / Variação</span>
+                        <div className="flex flex-wrap gap-2">
+                          {selectedProductDetails.variations && selectedProductDetails.variations.length > 0 ? (
+                            selectedProductDetails.variations.map((v: any) => {
+                              const isSelected = selectedVariationId === v.id;
+                              const hasStock = v.stock > 0;
+                              return (
+                                <button
+                                  key={v.id}
+                                  type="button"
+                                  disabled={!hasStock}
+                                  onClick={() => {
+                                    setSelectedVariationId(v.id);
+                                    setSelectedSabor(v.name);
+                                  }}
+                                  className={`px-3.5 py-2.5 rounded-xl border text-[9px] uppercase tracking-wider font-extrabold transition-all cursor-pointer active:scale-95 flex flex-col items-start gap-1 ${
+                                    isSelected
+                                      ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 font-black shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                                      : hasStock 
+                                        ? "bg-black/40 border-white/5 text-zinc-400 hover:text-white hover:border-white/12"
+                                        : "bg-[#141416]/20 border-white/2 text-zinc-600 cursor-not-allowed opacity-30"
+                                  }`}
+                                >
+                                  <span>{v.name}</span>
+                                  <span className="text-[7.5px] opacity-60 font-mono font-medium lowercase">({v.stock} un)</span>
+                                </button>
+                              );
+                            })
+                          ) : (
+                            (
+                              selectedProductDetails.category?.toLowerCase().includes('cerveja') || 
+                              selectedProductDetails.category?.toLowerCase().includes('chope') || 
+                              selectedProductDetails.category?.toLowerCase().includes('refrigerante') ||
+                              selectedProductDetails.category?.toLowerCase().includes('suco') ||
+                              selectedProductDetails.category?.toLowerCase().includes('refri') ||
+                              selectedProductDetails.category?.toLowerCase().includes('bebida')
+                                ? ['Normal', 'Gelado (Trincando)', 'Sem Gelo', 'Com Gelo e Limão']
+                                : selectedProductDetails.category?.toLowerCase().includes('pizza') || 
+                                  selectedProductDetails.category?.toLowerCase().includes('pastel') || 
+                                  selectedProductDetails.category?.toLowerCase().includes('doce') || 
+                                  selectedProductDetails.category?.toLowerCase().includes('café') ||
+                                  selectedProductDetails.category?.toLowerCase().includes('hambú')
+                                  ? ['Tradicional', 'Gourmet (+ R$ 4,00)', 'Sabor Chocolate', 'Sabor Morango', 'Zero Açúcar']
+                                  : ['Padrão', 'Premium (+ R$ 5,00)', 'Edição Especial', 'Embalagem Presente']
+                            ).map((sabor) => {
+                              const isSelected = selectedSabor === sabor;
+                              return (
+                                <button
+                                  key={sabor}
+                                  type="button"
+                                  onClick={() => setSelectedSabor(sabor)}
+                                  className={`px-3.5 py-2.5 rounded-xl border text-[9px] uppercase tracking-wider font-extrabold transition-all cursor-pointer active:scale-95 ${
+                                    isSelected
+                                      ? "bg-emerald-500/10 border-emerald-500 text-emerald-400 font-black shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                                      : "bg-black/40 border-white/5 text-zinc-400 hover:text-white hover:border-white/12"
+                                  }`}
+                                >
+                                  {sabor}
+                                </button>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    {(() => {
+                      const hasVariations = selectedProductDetails.variations && selectedProductDetails.variations.length > 0;
+                      const activeVar = hasVariations && selectedVariationId
+                        ? selectedProductDetails.variations.find((v: any) => v.id === selectedVariationId)
+                        : null;
+
+                      const getVariationExtraPrice = (variation: string) => {
+                        if (variation.includes('+ R$ 4,00')) return 4;
+                        if (variation.includes('+ R$ 5,00')) return 5;
+                        return 0;
+                      };
+
+                      const extraPrice = getVariationExtraPrice(selectedSabor);
+                      const effectivePrice = activeVar
+                        ? (activeVar.price !== undefined ? activeVar.price : selectedProductDetails.price)
+                        : (selectedProductDetails.price + extraPrice);
+
+                      const targetStockLimit = activeVar ? activeVar.stock : selectedProductDetails.stock;
+
+                      return (
+                        <div className="space-y-4 border-t border-white/5 pt-4 mt-auto">
+                          <div className="grid grid-cols-2 gap-4 items-center">
+                            {/* Unit price with nice labels */}
+                            <div>
+                              <span className="text-[7.5px] font-mono text-zinc-500 uppercase block leading-none">Preço Unitário</span>
+                              <span className="text-2xl font-black text-emerald-400 font-mono tracking-tight block mt-1">
+                                R$ {effectivePrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+
+                            {/* Large Tactile Counter (Big Touch Targets) */}
+                            <div className="space-y-1.5 flex flex-col items-end">
+                              <span className="text-[7.5px] font-mono text-zinc-500 uppercase tracking-widest block">Quantidade</span>
+                              <div className="flex items-center gap-3.5">
+                                <button
+                                  type="button"
+                                  onClick={() => setModalQuantity(prev => Math.max(1, prev - 1))}
+                                  disabled={modalQuantity <= 1}
+                                  className="w-12 h-12 bg-white/5 border border-white/5 hover:bg-white/10 text-white rounded-xl flex items-center justify-center list-none disabled:opacity-20 disabled:pointer-events-none active:scale-90 transition-all cursor-pointer"
+                                >
+                                  <Minus className="w-5 h-5 text-emerald-400" />
+                                </button>
+                                <span className="text-lg font-mono font-black text-white w-8 text-center select-none">
+                                  {modalQuantity}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => setModalQuantity(prev => Math.min(targetStockLimit, prev + 1))}
+                                  disabled={modalQuantity >= targetStockLimit}
+                                  className="w-12 h-12 bg-white/5 border border-white/5 hover:bg-white/10 text-white rounded-xl flex items-center justify-center list-none disabled:opacity-20 disabled:pointer-events-none active:scale-90 transition-all cursor-pointer"
+                                >
+                                  <Plus className="w-5 h-5 text-emerald-400" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Total of item and Confirmation Action (Big buttons, no double clicking) */}
+                          <div className="pt-4 border-t border-white/5 flex flex-col sm:flex-row gap-4 items-center justify-between">
+                            <div className="text-left w-full sm:w-auto">
+                              <span className="text-[8px] font-mono text-zinc-500 uppercase tracking-wider block">Subtotal Calculado</span>
+                              <span className="text-3xl font-black text-white font-mono tracking-tighter">
+                                R$ {(effectivePrice * modalQuantity).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              </span>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                addToCart(selectedProductDetails, modalQuantity, selectedSabor, effectivePrice, activeVar?.id);
+                                setSelectedProductDetails(null);
+                              }}
+                              className="w-full sm:w-auto px-8 py-4.5 bg-emerald-500 hover:bg-emerald-400 text-black text-[11px] font-black uppercase tracking-widest rounded-2xl transition-all shadow-lg hover:shadow-[0_0_20px_rgba(16,185,129,0.35)] active:scale-95 cursor-pointer text-center flex items-center justify-center gap-2"
+                            >
+                              <ShoppingCart className="w-4 h-4 text-black font-black" />
+                              Adicionar ao carrinho
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                 </div>
               </div>
 
-              {(() => {
-                const getVariationExtraPrice = (variation: string) => {
-                  if (variation.includes('+ R$ 4,00')) return 4;
-                  if (variation.includes('+ R$ 5,00')) return 5;
-                  return 0;
-                };
-                const extraPrice = getVariationExtraPrice(selectedSabor);
-                const effectivePrice = selectedProductDetails.price + extraPrice;
+            </motion.div>
+          </div>
+        )}
 
-                return (
-                  <>
-                    <div className="grid grid-cols-2 gap-4 items-center">
-                      {/* Unit price */}
-                      <div>
-                        <span className="text-[7.5px] font-mono text-zinc-500 uppercase block leading-none">Preço Unitário</span>
-                        <span className="text-xl font-black text-emerald-400 font-mono tracking-tight block mt-1">
-                          R$ {effectivePrice.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
+        {/* CANCEL CONFIRMATION MODAL */}
+        {showCancelModal && (
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(239,68,68,0.05),_transparent_60%)] pointer-events-none" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-md bg-[#0e0e0e] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl relative text-center"
+            >
+              <div className="w-16 h-16 bg-red-500/10 border border-red-500/25 rounded-3xl flex items-center justify-center text-red-500 mx-auto">
+                <AlertTriangle className="w-8 h-8 animate-pulse" />
+              </div>
 
-                      {/* Tactile Counter */}
-                      <div className="space-y-1.5 flex flex-col items-end">
-                        <span className="text-[7.5px] font-mono text-zinc-500 uppercase tracking-widest block">Quantidade</span>
-                        <div className="flex items-center gap-3">
-                          <button
-                            onClick={() => setModalQuantity(prev => Math.max(1, prev - 1))}
-                            disabled={modalQuantity <= 1}
-                            className="w-10 h-10 bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 text-white/80 font-bold rounded-xl flex items-center justify-center list-none disabled:opacity-30 disabled:pointer-events-none"
-                          >
-                            <Minus className="w-4 h-4" />
-                          </button>
-                          <span className="text-sm font-mono font-black text-white w-6 text-center">
-                            {modalQuantity}
-                          </span>
-                          <button
-                            onClick={() => setModalQuantity(prev => Math.min(selectedProductDetails.stock, prev + 1))}
-                            disabled={modalQuantity >= selectedProductDetails.stock}
-                            className="w-10 h-10 bg-white/5 border border-white/5 hover:bg-white/10 active:scale-95 text-white/80 font-bold rounded-xl flex items-center justify-center list-none disabled:opacity-30 disabled:pointer-events-none"
-                          >
-                            <Plus className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
+              <div className="space-y-2">
+                <h3 className="text-lg font-black text-white uppercase tracking-wider">Deseja realmente cancelar este atendimento?</h3>
+                <p className="text-[10px] text-zinc-400 uppercase leading-relaxed font-semibold">
+                  O carrinho e os dados desta sessão serão apagados.
+                </p>
+                {(paymentStatus === 'processing' || paymentStatus === 'waiting_pix' || paymentStatus === 'waiting_cash' || paymentStatus === 'waiting_card') && (
+                  <div className="mt-4 p-3 bg-red-500/10 border border-red-500/20 text-red-500 rounded-xl text-[9px] font-extrabold uppercase leading-normal">
+                    Fase de Pagamento Ativa! Existe uma transação em andamento ou aguardando operador. Se você cancelar, essa transação será descartada.
+                  </div>
+                )}
+              </div>
 
-                    {/* Total and add CTA */}
-                    <div className="pt-4 border-t border-white/5 flex flex-col sm:flex-row gap-4 items-center justify-between">
-                      <div className="text-left w-full sm:w-auto">
-                        <span className="text-[8px] font-mono text-zinc-400 uppercase tracking-wider block">Total Geral do Item</span>
-                        <span className="text-2xl font-black text-white font-mono tracking-tighter">
-                          R$ {(effectivePrice * modalQuantity).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-                        </span>
-                      </div>
+              <div className="flex gap-4 pt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowCancelModal(false)}
+                  className="flex-1 py-4 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 cursor-pointer text-center"
+                >
+                  Continuar comprando
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowCancelModal(false);
+                    startNewSession();
+                  }}
+                  className="flex-1 py-4 bg-red-500 hover:bg-red-400 text-black rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all hover:shadow-[0_0_15px_rgba(239,68,68,0.3)] active:scale-95 cursor-pointer text-center"
+                >
+                  Cancelar atendimento
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
 
-                      <button
-                        onClick={() => {
-                          addToCart(selectedProductDetails, modalQuantity, selectedSabor, effectivePrice);
-                          setSelectedProductDetails(null);
-                        }}
-                        className="w-full sm:w-auto px-6 py-4 bg-emerald-500 hover:bg-emerald-400 text-black text-[10px] font-black uppercase tracking-widest rounded-xl transition-all hover:shadow-[0_0_15px_rgba(16,185,129,0.3)] active:scale-97 cursor-pointer text-center"
-                      >
-                        Confirmar Adição
-                      </button>
-                    </div>
-                  </>
-                );
-              })()}
+        {/* INACTIVITY TIMEOUT MODAL */}
+        {showTimeoutModal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_rgba(245,158,11,0.05),_transparent_60%)] pointer-events-none" />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              className="w-full max-w-md bg-[#0e0e0e] border border-white/5 rounded-[2.5rem] p-8 space-y-6 shadow-2xl relative text-center"
+            >
+              <div className="w-16 h-16 bg-amber-500/10 border border-amber-500/25 rounded-3xl flex items-center justify-center text-amber-500 mx-auto">
+                <AlertCircle className="w-8 h-8 animate-bounce" />
+              </div>
+
+              <div className="space-y-2">
+                <h3 className="text-xl font-black text-white uppercase tracking-wider">Você ainda está aí?</h3>
+                <p className="text-[10px] text-zinc-400 uppercase leading-relaxed font-semibold">
+                  Identificamos inatividade neste terminal. Esta sessão será encerrada automaticamente em:
+                </p>
+                <div className="text-4xl font-black text-amber-500 font-mono tracking-tight animate-pulse py-2">
+                  {timeoutCountdown}s
+                </div>
+              </div>
+
+              <div className="flex gap-4 pt-2">
+                <button
+                  type="button"
+                  onClick={handleEndSession}
+                  className="flex-1 py-4 bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-white rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all active:scale-95 cursor-pointer text-center"
+                >
+                  Encerrar atendimento
+                </button>
+                <button
+                  type="button"
+                  onClick={handleContinueSession}
+                  className="flex-1 py-4 bg-emerald-500 hover:bg-emerald-400 text-black rounded-2xl text-[9px] font-black uppercase tracking-widest transition-all hover:shadow-[0_0_15px_rgba(16,185,129,0.3)] active:scale-95 cursor-pointer text-center"
+                >
+                  Continuar atendimento
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

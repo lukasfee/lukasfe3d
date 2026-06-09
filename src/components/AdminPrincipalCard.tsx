@@ -104,6 +104,21 @@ export default function AdminPrincipalCard({
       return;
     }
 
+    const sanitizedLogin = editLogin.trim().toLowerCase();
+    if (!sanitizedLogin) {
+      setEditError('O login/matrícula do administrador é obrigatório.');
+      return;
+    }
+
+    const duplicateLogin = users.some(
+      (u) => u.id !== 'admin' && (u.login || u.matricula || '').trim().toLowerCase() === sanitizedLogin
+    );
+
+    if (duplicateLogin) {
+      setEditError('Este login/matrícula já está em uso por outro colaborador.');
+      return;
+    }
+
     // Check if user is filling in password change fields
     if (currentPassword || newPassword || confirmNewPassword) {
       if (currentPassword !== adminUser?.password) {
@@ -129,15 +144,22 @@ export default function AdminPrincipalCard({
       
       updateUser(adminUser.id, {
         fullName: cleanName,
+        login: sanitizedLogin,
+        matricula: sanitizedLogin,
         password: nextPwd,
-        image: editImage
+        image: editImage,
+        roleId: 'administrador',
+        status: 'ativo',
+        isAdmin: true,
+        isOwner: true,
+        isMasterAdmin: true
       });
 
       useStore.getState().logAction({
         module: 'Segurança',
         actionType: 'security',
         action: 'Atualizar Dados ADM',
-        description: `Dados cadastrais do Administrador atualizados (${cleanName})${newPassword ? ' e a senha foi alterada' : ''}`,
+        description: `Dados cadastrais do Administrador atualizados (${cleanName}), login/matrícula alterado para: ${sanitizedLogin}${newPassword ? ' e a senha foi alterada' : ''}`,
         status: 'sucesso'
       });
 
@@ -549,21 +571,16 @@ export default function AdminPrincipalCard({
               />
             </div>
 
-            {/* Admin Login (Read-only string fixed value admin as requested) */}
+            {/* Admin Login */}
             <div>
-              <label className="text-[8px] text-white/40 uppercase tracking-widest font-black block mb-1">Login / Matrícula ADM (Inalterável)</label>
-              <div className="relative">
-                <input
-                  type="text"
-                  value={adminUser?.login || "admin"}
-                  disabled
-                  readOnly
-                  className="w-full bg-white/[0.02] border border-white/5 rounded-xl px-3.5 py-2.5 text-xs text-white/40 font-mono font-bold tracking-widest cursor-not-allowed select-none"
-                />
-                <span className="absolute right-3.5 top-2.5 text-[6.5px] bg-red-500/10 border border-red-500/20 text-red-500 px-1.5 py-0.5 rounded font-black uppercase">
-                  FIXO
-                </span>
-              </div>
+              <label className="text-[8px] text-white/40 uppercase tracking-widest font-black block mb-1">Login / Matrícula ADM</label>
+              <input
+                type="text"
+                value={editLogin}
+                onChange={(e) => setEditLogin(e.target.value)}
+                className="w-full bg-black/60 border border-white/10 rounded-xl px-3.5 py-2.5 text-xs text-white font-semibold focus:outline-none focus:border-emerald-500/50 transition-all font-mono tracking-widest"
+                placeholder="Ex: admin"
+              />
             </div>
           </div>
 
@@ -690,6 +707,7 @@ export default function AdminPrincipalCard({
             <button
               onClick={() => {
                 setEditFullName(adminUser?.fullName || '');
+                setEditLogin(adminUser?.login || '');
                 setEditImage(adminUser?.image || '');
                 setCurrentPassword('');
                 setNewPassword('');

@@ -62,15 +62,12 @@ export default function PdvTotemAdmin() {
   });
   const [lastActionStatus, setLastActionStatus] = useState<string | null>(null);
 
-  // Legacy state definitions so old layouts compile perfectly
-  const [waitingRequest, setWaitingRequest] = useState<any | null>(null);
-  const [waitingPixRequest, setWaitingPixRequest] = useState<any | null>(null);
-  const [cashReceived, setCashReceived] = useState<string>('');
-
   // Independent Multi-Terminal State Engine
   const [waitingRequests, setWaitingRequests] = useState<Record<number, any>>({});
   const [openWindows, setOpenWindows] = useState<Record<number, boolean>>({});
   const [cashReceivedMap, setCashReceivedMap] = useState<Record<number, string>>({});
+  const [processedIds, setProcessedIds] = useState<string[]>([]);
+  const [totemDestinations, setTotemDestinations] = useState<Record<number, 'gestao-pedidos' | 'em-producao'>>({});
 
   // Screen / Monitor positioning manager
   const [monitorSelectTerminalId, setMonitorSelectTerminalId] = useState<number | null>(null);
@@ -79,8 +76,6 @@ export default function PdvTotemAdmin() {
   const [electronKioskOpen, setElectronKioskOpen] = useState(false);
   const [electronIsFullscreen, setElectronIsFullscreen] = useState(false);
   const [kioskWindow, setKioskWindow] = useState<Window | null>(null);
-  const [isKioskActive, setIsKioskActive] = useState(false);
-  const [kioskStatus, setKioskStatus] = useState<any | null>(null);
   const [isTotemSecondScreenLocked, setIsTotemSecondScreenLocked] = useState(false);
 
   const handleToggleSecondScreenLock = () => {
@@ -89,6 +84,7 @@ export default function PdvTotemAdmin() {
 
   const lastHeartbeatsRef = useRef<Record<number, number>>({ 1: 0, 2: 0, 3: 0 });
   const kioskWindowsRef = useRef<Record<number, Window | null>>({});
+  const lastScreenCountRef = useRef<number | null>(null);
 
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
@@ -185,6 +181,35 @@ export default function PdvTotemAdmin() {
             setIsTotemSecondScreenLocked(locked);
           }).catch((e: any) => console.error('Error getting lock state:', e));
         }
+
+        // Rule 7: Monitor screen connections / disconnections
+        if (bridge?.getConnectedScreens) {
+          bridge.getConnectedScreens().then((screens: any[] | null) => {
+            const detectedScreens = screens || [];
+            const currentCount = detectedScreens.length;
+
+            if (lastScreenCountRef.current !== null && currentCount < lastScreenCountRef.current) {
+              const secondaryScreens = detectedScreens.filter((s: any) => !s.isPrimary);
+              const allowedSecondaryCount = secondaryScreens.length;
+
+              alert(`ATENÇÃO OPERADOR:\n\nUm monitor secundário foi desconectado (Telas: ${lastScreenCountRef.current} -> ${currentCount}).\n\nFechando terminais excedentes por segurança para evitar telas fantasmas.`);
+
+              // Close exceeding active terminals directly to ensure safety
+              [1, 2, 3].forEach(id => {
+                if (id > allowedSecondaryCount && kioskWindowsRef.current[id] && !kioskWindowsRef.current[id]?.closed) {
+                  try {
+                    kioskWindowsRef.current[id]?.close();
+                    kioskWindowsRef.current[id] = null;
+                  } catch (err) {
+                    console.error(`Error closing terminal ${id} on disconnection:`, err);
+                  }
+                  setOpenWindows(prev => ({ ...prev, [id]: false }));
+                }
+              });
+            }
+            lastScreenCountRef.current = currentCount;
+          }).catch((e: any) => console.error('Error retrieving connected screens in loop:', e));
+        }
       };
       
       checkStatus();
@@ -206,11 +231,11 @@ export default function PdvTotemAdmin() {
     }
   };
 
-  const handleOpenTerminalDirect = (id: number, leftOffset: number = 0, targetWidth: number = 1024, targetHeight: number = 768) => {
+  const handleOpenTerminalDirect = (id: number, leftOffset?: number, targetWidth: number = 1024, targetHeight: number = 768) => {
     const currentLoc = window.location.href.split('#')[0];
     const url = currentLoc + `#/pdv-totem/kiosk?terminal=${id}`;
     let features = `width=${targetWidth},height=${targetHeight},menubar=no,status=no,toolbar=no,resizable=yes`;
-    if (leftOffset !== 0) {
+    if (leftOffset !== undefined) {
       features += `,left=${leftOffset},top=0`;
     }
     const win = window.open(url, `pdv-totem-kiosk-token-${id}`, features);
@@ -226,12 +251,24 @@ export default function PdvTotemAdmin() {
   };
 
   const handleOpenTerminal = async (id: number) => {
-    let screens: any[] = [];
-    let isFallback = false;
+    // Rule 5: If the terminal is already open, do not open a duplicate
+    if (kioskWindowsRef.current[id] && !kioskWindowsRef.current[id]?.closed) {
+      alert(`O Terminal 0${id} já está aberto.`);
+      return;
+    }
 
-    // 1. Try to get screens natively via Electron
+    let screens: any[] = [];
+
+    // Rule 9: In standard Web environment without Electron, do not attempt to detect multiple real monitors
+    if (!isDesktop()) {
+      alert(`AMBIENTE WEB (MODO LIMITADO):\n\nDetecção de múltiplos monitores físicos está disponível apenas no aplicativo Desktop/Electron.\n\nO Terminal 0${id} será aberto na tela principal como uma janela secundária.`);
+      handleOpenTerminalDirect(id);
+      return;
+    }
+
+    // 10. Native desktop display retrieval
     const bridge = (window as any).electron;
-    if (isDesktop() && bridge?.getConnectedScreens) {
+    if (bridge?.getConnectedScreens) {
       try {
         screens = await bridge.getConnectedScreens() || [];
       } catch (err) {
@@ -239,47 +276,33 @@ export default function PdvTotemAdmin() {
       }
     }
 
-    // 2. Try to get screens via standard browser Screen Details API
-    if (screens.length === 0 && typeof window !== 'undefined' && 'getScreenDetails' in window) {
-      try {
-        const details = await (window as any).getScreenDetails();
-        screens = details.screens || [];
-      } catch (err) {
-        console.warn('Screen Details API error or permission denied:', err);
-      }
-    }
-
-    // 3. Fall back to manual virtual screens if no screens were detected
+    // Fallback if no screens returned, treat current window screen as primary
     if (screens.length === 0) {
-      const primaryWidth = window.screen?.width || 1920;
-      screens = [
-        { label: 'Monitor Secundário à Direita (Extensão)', isPrimary: false, left: primaryWidth, top: 0, width: 1920, height: 1080 },
-        { label: 'Monitor Secundário à Esquerda (Extensão)', isPrimary: false, left: -primaryWidth, top: 0, width: 1920, height: 1080 }
-      ];
-      isFallback = true;
+      screens = [{ isPrimary: true, left: 0, top: 0, width: window.screen?.width || 1920, height: window.screen?.height || 1080 }];
     }
 
-    // 4. Implement the user's monitor selection flow
-    if (screens.length === 1) {
-      // Only 1 monitor connected in total: open automatically here
-      handleOpenTerminalDirect(id, 0);
-    } else {
-      // More than 1 monitor connected: "nao vale tela principal tipo notebook"
-      const secondaryScreens = screens.filter(s => !s.isPrimary);
+    const totalScreens = screens.length;
+    const secondaryScreens = screens.filter(s => !s.isPrimary);
+    const availableTerminalsCount = secondaryScreens.length; // S = screens.length - 1
 
-      if (secondaryScreens.length === 1) {
-        // Exactly 1 secondary monitor connected: open automatically on it
-        const sec = secondaryScreens[0];
-        handleOpenTerminalDirect(id, sec.left || 0, sec.width || 1024, sec.height || 768);
-      } else if (secondaryScreens.length > 1) {
-        // Multiple secondary monitors: ask the user which monitor to open on
-        setAvailableScreens(secondaryScreens);
-        setMonitorSelectTerminalId(id);
-        setShowScreenFallbackPrompt(isFallback);
-      } else {
-        // Stale or no secondary screens: fall back to open locally
-        handleOpenTerminalDirect(id, 0);
-      }
+    // Rule 2 / Rule 1: No secondary screen available or only 1 screen total connected. Show required alert and block.
+    if (totalScreens <= 1 || availableTerminalsCount === 0) {
+      alert("Nenhuma tela secundária detectada para abrir o terminal Totem.");
+      return;
+    }
+
+    // Rule 6: Block if terminal index exceeds available secondary displays count
+    if (id > availableTerminalsCount) {
+      alert(`Apenas ${availableTerminalsCount} tela(s) secundária(s) detectada(s).\n\nNão é possível abrir o Terminal 0${id} porque não há telas secundárias suficientes conectadas.`);
+      return;
+    }
+
+    // Rule 4: Map terminal 1-to-1 to its corresponding unique physical secondary screen index
+    const targetScreen = secondaryScreens[id - 1];
+    if (targetScreen) {
+      handleOpenTerminalDirect(id, targetScreen.left || 0, targetScreen.width || 1024, targetScreen.height || 768);
+    } else {
+      alert("Erro ao mapear tela secundária correspondente para este terminal.");
     }
   };
 
@@ -316,20 +339,6 @@ export default function PdvTotemAdmin() {
     setTimeout(() => setLastActionStatus(null), 3000);
   };
 
-  const handleToggleLockTerminal = (id: number, currentLocked: boolean) => {
-    const nextLocked = !currentLocked;
-    safePostMessage({
-      type: 'totem-second-screen-lock-changed',
-      payload: { terminalId: id, isLocked: nextLocked }
-    });
-    setTerminalsState(prev => ({
-      ...prev,
-      [id]: { ...prev[id], isLocked: nextLocked }
-    }));
-    setLastActionStatus(`Terminal ${id}: ${nextLocked ? 'Trancado' : 'Desbloqueado'}.`);
-    setTimeout(() => setLastActionStatus(null), 3000);
-  };
-
   const handleOpenControlTerminal = (id: number) => {
     const currentLoc = window.location.href.split('#')[0];
     const url = currentLoc + `#/pdv-totem/kiosk?terminal=${id}&control=true`;
@@ -344,6 +353,15 @@ export default function PdvTotemAdmin() {
   };
 
   const handleToggleFullscreenTerminal = (id: number) => {
+    if (!openWindows[id] && !terminalsState[id].isOnline) {
+      alert("Abra a tela do terminal antes de ativar o modo quiosque.");
+      return;
+    }
+
+    if (!isDesktop()) {
+      alert("Modo Quiosque real está disponível apenas no Desktop/Electron. No navegador, o modo tela cheia pode depender de interação local.");
+    }
+
     setTerminalsState(prev => {
       const nextFullscreen = !prev[id].isFullscreen;
       safePostMessage({
@@ -424,38 +442,21 @@ export default function PdvTotemAdmin() {
             }
             return prev;
           });
-
-          // Sync legacy state variables from Terminal 1
-          if (tId === 1) {
-            setIsKioskActive(true);
-            setKioskStatus({
-              currentStep: payload.currentStep,
-              cartCount: payload.cartCount,
-              paymentStatus: payload.paymentStatus,
-            });
-          }
         }
       } else if (type === 'totem-pix-waiting') {
         const enriched = { ...payload, paymentType: 'pix' };
-        setWaitingPixRequest(enriched);
-        setWaitingRequest(enriched);
         const tId = payload?.terminalId || 1;
         setWaitingRequests(prev => ({ ...prev, [tId]: enriched }));
       } else if (type === 'totem-cash-waiting') {
         const enriched = { ...payload, paymentType: 'money' };
-        setWaitingRequest(enriched);
-        setCashReceived('');
         const tId = payload?.terminalId || 1;
         setWaitingRequests(prev => ({ ...prev, [tId]: enriched }));
         setCashReceivedMap(prev => ({ ...prev, [tId]: '' }));
       } else if (type === 'totem-card-waiting') {
         const enriched = { ...payload, paymentType: 'card' };
-        setWaitingRequest(enriched);
         const tId = payload?.terminalId || 1;
         setWaitingRequests(prev => ({ ...prev, [tId]: enriched }));
       } else if (type === 'totem-pix-cancelled' || type === 'totem-payment-cancelled' || type === 'totem-payment-refused' || type === 'totem-pix-refused') {
-        setWaitingPixRequest(null);
-        setWaitingRequest(null);
         const tId = payload?.terminalId;
         if (tId) {
           setWaitingRequests(prev => {
@@ -465,8 +466,6 @@ export default function PdvTotemAdmin() {
           });
         }
       } else if (type === 'totem-payment-approved' || type === 'totem-pix-approved') {
-        setWaitingPixRequest(null);
-        setWaitingRequest(null);
         const tId = payload?.terminalId;
         if (tId) {
           setWaitingRequests(prev => {
@@ -524,15 +523,21 @@ export default function PdvTotemAdmin() {
   }, [totemSalesToday]);
 
   // Action helpers and triggers
-  const triggerAction = (type: string, description: string) => {
-    safePostMessage({ type });
+  const triggerAction = (terminalId: number, type: string, description: string) => {
+    safePostMessage({
+      type,
+      payload: { terminalId }
+    });
     setLastActionStatus(description);
     setTimeout(() => setLastActionStatus(null), 3000);
   };
 
   const handleApprovePayment = (idNum: number, amountReceived?: number, change?: number) => {
-    const req = waitingRequests[idNum] || (idNum === 1 ? waitingRequest : null);
+    const req = waitingRequests[idNum];
     if (!req) return;
+    if (processedIds.includes(req.id)) return;
+    setProcessedIds(prev => [...prev, req.id]);
+
     try {
       const salePayloadCopy = { ...req.salePayload };
       if (req.paymentType === 'money' && amountReceived !== undefined) {
@@ -547,29 +552,33 @@ export default function PdvTotemAdmin() {
         salePayloadCopy.sellerLogin = currentUser.login;
       }
 
+      // Link production order destination set by operator
+      const orderDest = totemDestinations[idNum] || 'gestao-pedidos';
+      salePayloadCopy.status = orderDest === 'em-producao' ? 'em_producao' : 'aguardando_separacao';
+      if (orderDest === 'em-producao') {
+        salePayloadCopy.productionStatus = 'em_fila';
+        salePayloadCopy.productionPriority = 'media';
+      }
+      salePayloadCopy.origin = 'Totem';
+
       const createdOrder = addSale(salePayloadCopy);
       if (createdOrder) {
         // Post both generic and specific success signals WITH terminalId
         safePostMessage({
           type: 'totem-payment-approved',
-          payload: { terminalId: idNum, sale: createdOrder }
+          payload: { terminalId: idNum, id: req.id, sale: createdOrder }
         });
         safePostMessage({
           type: 'totem-pix-approved',
-          payload: { terminalId: idNum, sale: createdOrder }
+          payload: { terminalId: idNum, id: req.id, sale: createdOrder }
         });
 
-        // Clean up both independent and legacy states to prevent stuck screens
+        // Clean up independent states to prevent stuck screens
         setWaitingRequests(prev => {
           const next = { ...prev };
           delete next[idNum];
           return next;
         });
-        if (idNum === 1) {
-          setWaitingRequest(null);
-          setWaitingPixRequest(null);
-          setCashReceived('');
-        }
         setCashReceivedMap(prev => {
           const next = { ...prev };
           delete next[idNum];
@@ -579,22 +588,27 @@ export default function PdvTotemAdmin() {
         setTimeout(() => setLastActionStatus(null), 4000);
       } else {
         alert('Erro ao registrar a venda no ERP. Tente novamente.');
+        setProcessedIds(prev => prev.filter(id => id !== req.id));
       }
     } catch (err: any) {
       alert('Erro ao registrar a venda: ' + (err?.message || err));
+      setProcessedIds(prev => prev.filter(id => id !== req.id));
     }
   };
 
   const handleRefusePayment = (idNum: number) => {
-    const req = waitingRequests[idNum] || (idNum === 1 ? waitingRequest : null);
+    const req = waitingRequests[idNum];
     if (!req) return;
+    if (processedIds.includes(req.id)) return;
+    setProcessedIds(prev => [...prev, req.id]);
+
     safePostMessage({
       type: 'totem-payment-refused',
-      payload: { terminalId: idNum }
+      payload: { terminalId: idNum, id: req.id }
     });
     safePostMessage({
       type: 'totem-pix-refused',
-      payload: { terminalId: idNum }
+      payload: { terminalId: idNum, id: req.id }
     });
 
     setWaitingRequests(prev => {
@@ -602,11 +616,6 @@ export default function PdvTotemAdmin() {
       delete next[idNum];
       return next;
     });
-    if (idNum === 1) {
-      setWaitingRequest(null);
-      setWaitingPixRequest(null);
-      setCashReceived('');
-    }
     setCashReceivedMap(prev => {
       const next = { ...prev };
       delete next[idNum];
@@ -614,14 +623,6 @@ export default function PdvTotemAdmin() {
     });
     setLastActionStatus(`Terminal 0${idNum}: Pagamento cancelado ou recusado.`);
     setTimeout(() => setLastActionStatus(null), 4000);
-  };
-
-  const handleApprovePix = () => {
-    handleApprovePayment(1);
-  };
-
-  const handleRefusePix = () => {
-    handleRefusePayment(1);
   };
 
   const handleOpenKiosk = async () => {
@@ -699,7 +700,7 @@ export default function PdvTotemAdmin() {
         kioskWindow.close();
         setKioskWindow(null);
       }
-      triggerAction('close-kiosk', 'Remoto: Fechar Kiosk enviado.');
+      triggerAction(1, 'close-kiosk', 'Remoto: Fechar Kiosk enviado.');
     }
   };
 
@@ -713,7 +714,7 @@ export default function PdvTotemAdmin() {
         console.error('Error reloading Electron kiosk window:', err);
       }
     } else {
-      triggerAction('reload-kiosk', 'Remoto: Recarregar Kiosk enviado.');
+      triggerAction(1, 'reload-kiosk', 'Remoto: Recarregar Kiosk enviado.');
     }
   };
 
@@ -770,7 +771,16 @@ export default function PdvTotemAdmin() {
           <p className="text-[10px] text-zinc-500 uppercase tracking-widest leading-none">Monitoramento e Controle Remoto de Autoatendimento Independente</p>
         </div>
         
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          {isDesktop() ? (
+            <span className="px-3 py-1 bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full text-[9px] font-mono font-bold tracking-wide uppercase">
+              Desktop Native (Sincronizado)
+            </span>
+          ) : (
+            <span className="px-3 py-1 bg-amber-500/10 border border-amber-500/20 text-amber-500 rounded-full text-[9px] font-mono font-bold tracking-wide uppercase">
+              Ambiente Web (Modo Limitado)
+            </span>
+          )}
           <span className="px-3 py-1 bg-emerald-500/10 border border-white/5 text-emerald-400 rounded-full text-[9px] font-mono font-bold tracking-wide">
             3 TERMINAIS SUPORTADOS
           </span>
@@ -890,6 +900,35 @@ export default function PdvTotemAdmin() {
                       Chave PIX: {req.chosenMethod?.pixKey || 'Padrão da Empresa'}
                     </span>
                   )}
+                </div>
+
+                {/* Operator Destination Control */}
+                <div className="pt-2 border-t border-white/5 space-y-1.5 align-middle">
+                  <span className="text-[9px] text-zinc-500 uppercase font-bold block">Encaminhar Pedido Criado Para:</span>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setTotemDestinations(prev => ({ ...prev, [terminalIdNum]: 'gestao-pedidos' }))}
+                      className={`flex-1 py-1 px-2 rounded-lg text-[8px] font-black uppercase font-sans tracking-wider border cursor-pointer transition-all ${
+                        (totemDestinations[terminalIdNum] || 'gestao-pedidos') === 'gestao-pedidos'
+                          ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-400 font-extrabold'
+                          : 'bg-transparent border-white/5 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Gestão Comum
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setTotemDestinations(prev => ({ ...prev, [terminalIdNum]: 'em-producao' }))}
+                      className={`flex-1 py-1 px-2 rounded-lg text-[8px] font-black uppercase font-sans tracking-wider border cursor-pointer transition-all ${
+                        totemDestinations[terminalIdNum] === 'em-producao'
+                          ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 font-extrabold shadow-[0_0_10px_rgba(245,158,11,0.12)]'
+                          : 'bg-transparent border-white/5 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      Em Produção
+                    </button>
+                  </div>
                 </div>
                 
                 <div className="space-y-1.5 pt-1 border-t border-white/5">
@@ -1163,7 +1202,7 @@ export default function PdvTotemAdmin() {
                   <button
                      onClick={() => handleReloadTerminal(id)}
                      disabled={!openWindows[id] && !isOnline}
-                     className="py-1.5 disabled:opacity-40 bg-zinc-900 border border-white/5 hover:bg-zinc-850 text-zinc-400 text-[7px] font-bold uppercase rounded-lg transition-all text-center cursor-pointer"
+                     className="py-1.5 disabled:opacity-40 bg-zinc-900 border border-white/5 hover:bg-zinc-850 text-zinc-400 text-[8px] font-bold uppercase rounded-lg transition-all text-center cursor-pointer"
                      title="Reiniciar aplicativo"
                   >
                     Recarregar
@@ -1171,35 +1210,24 @@ export default function PdvTotemAdmin() {
                   <button
                     onClick={() => handleResetTerminal(id)}
                     disabled={!openWindows[id] && !isOnline}
-                    className="py-1.5 disabled:opacity-40 bg-zinc-900 border border-white/5 hover:bg-zinc-850 text-zinc-400 text-[7px] font-bold uppercase rounded-lg transition-all text-center cursor-pointer"
+                    className="py-1.5 disabled:opacity-40 bg-zinc-900 border border-white/5 hover:bg-zinc-850 text-zinc-400 text-[8px] font-bold uppercase rounded-lg transition-all text-center cursor-pointer"
                     title="Limpar sessão atual e voltar para boas-vindas"
                   >
                     Resetar
                   </button>
-
-                  <button
-                    onClick={() => handleToggleLockTerminal(id, term.isLocked)}
-                    disabled={!openWindows[id] && !isOnline}
-                    className={`py-1.5 disabled:opacity-40 border text-[7.5px] font-bold uppercase rounded-lg transition-all text-center cursor-pointer ${
-                      term.isLocked
-                        ? 'bg-amber-500/10 border-amber-500/20 text-amber-500 hover:bg-amber-500/20'
-                        : 'bg-zinc-900 border-white/5 hover:bg-zinc-850 text-zinc-400'
-                    }`}
-                  >
-                    {term.isLocked ? 'Desbloquear' : 'Trancar'}
-                  </button>
-                  <button
-                    onClick={() => handleToggleFullscreenTerminal(id)}
-                    disabled={!openWindows[id] && !isOnline}
-                    className={`py-1.5 disabled:opacity-40 border text-[7.5px] font-bold uppercase rounded-lg transition-all text-center cursor-pointer ${
-                      term.isFullscreen
-                        ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 hover:bg-blue-500/20'
-                        : 'bg-zinc-900 border-white/5 hover:bg-zinc-850 text-zinc-400'
-                    }`}
-                  >
-                    {term.isFullscreen ? 'Modo Janela' : 'Alternar Kiosk'}
-                  </button>
                 </div>
+
+                <button
+                  onClick={() => handleToggleFullscreenTerminal(id)}
+                  disabled={!openWindows[id] && !isOnline}
+                  className={`w-full py-2 disabled:opacity-40 border text-[8px] font-black uppercase rounded-xl tracking-wider transition-all active:scale-95 text-center cursor-pointer ${
+                    term.isFullscreen
+                      ? 'bg-blue-500/10 border-blue-500/20 text-blue-400 hover:bg-blue-500/20'
+                      : 'bg-zinc-900 border-white/5 hover:bg-zinc-850 text-zinc-350'
+                  }`}
+                >
+                  {term.isFullscreen ? 'Desativar Quiosque' : 'Alternar Quiosque'}
+                </button>
               </div>
             </div>
           );

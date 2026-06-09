@@ -24,7 +24,7 @@ const SETTINGS_KEY = 'erp_corporate_backup_settings';
 const DEFAULT_SETTINGS: CorporateBackupSettings = {
   autoBackupEnabled: true,
   frequencyHours: 24,
-  maxAutoSnapshots: 10,
+  maxAutoSnapshots: 50,
   lastExecutionTimestamp: null,
   storageWarningThresholdMb: 50
 };

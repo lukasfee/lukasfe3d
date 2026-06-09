@@ -29,7 +29,8 @@ import {
   FileText,
   RotateCcw,
   Check,
-  Filter
+  Filter,
+  Upload
 } from 'lucide-react';
 import { cn } from '../lib/utils';
 import { useStore, Product, Category, Subcategory } from '../store';
@@ -483,11 +484,47 @@ export default function InventoryModule() {
     image: '',
     extraImages: [] as string[],
     productionId: '',
-    productionMode: 'stock' as 'stock' | 'on_demand'
+    productionMode: 'stock' as 'stock' | 'on_demand',
+    variations: [] as any[],
+    file3d: undefined as { name: string; type: string; data: string; } | undefined
   });
 
+  // Synchronize parent stock with the sum of children variations
+  React.useEffect(() => {
+    if (formData.variations && formData.variations.length > 0) {
+      const sumStock = formData.variations.reduce((sum, v) => sum + (Number(v.stock) || 0), 0);
+      if (formData.stock !== sumStock) {
+        setFormData(prev => ({ ...prev, stock: sumStock }));
+      }
+    }
+  }, [formData.variations, formData.stock]);
+
   const extraFileInputRef = useRef<HTMLInputElement>(null);
+  const file3dInputRef = useRef<HTMLInputElement>(null);
   const [activeExtraImageIndex, setActiveExtraImageIndex] = useState<number | null>(null);
+
+  const handleFile3DChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      if (!['stl', '3mf', 'glb', 'gltf'].includes(ext)) {
+        alert('Formato de arquivo inválido. Formatos aceitos: .3mf, .stl, .glb, .gltf');
+        return;
+      }
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setFormData(prev => ({
+          ...prev,
+          file3d: {
+            name: file.name,
+            type: ext,
+            data: reader.result as string
+          }
+        }));
+      };
+      reader.readAsDataURL(file);
+    }
+  };
 
   const triggerUploadExtraImage = (index: number) => {
     setActiveExtraImageIndex(index);
@@ -553,7 +590,9 @@ export default function InventoryModule() {
         image: product.image || '',
         extraImages: product.extraImages || [],
         productionId: product.productionId || '',
-        productionMode: product.productionMode || 'stock'
+        productionMode: product.productionMode || 'stock',
+        variations: product.variations || [],
+        file3d: product.file3d
       });
     } else {
       setEditingProduct(null);
@@ -575,7 +614,9 @@ export default function InventoryModule() {
         image: '',
         extraImages: [],
         productionId: '',
-        productionMode: 'stock'
+        productionMode: 'stock',
+        variations: [],
+        file3d: undefined
       });
     }
     setIsModalOpen(true);
@@ -652,6 +693,7 @@ export default function InventoryModule() {
   const handleQuickAdjustment = (id: string, amount: number) => {
     const product = products.find(p => p.id === id);
     if (!product) return;
+    if (product.variations && product.variations.length > 0) return;
     updateProduct(id, { stock: product.stock + amount });
     addActivity(`Ajuste de estoque (${amount > 0 ? '+' : ''}${amount}) para: ${product.name}`, 'inventory', 'Estoque');
   };
@@ -743,17 +785,24 @@ export default function InventoryModule() {
                       <span className="text-[8.5px] font-mono text-amber-500/60 uppercase tracking-widest">{product.code}</span>
                       <span className="text-[8.5px] font-black text-white/20 uppercase tracking-wider">{categories.find(c => c.id === product.categoryId)?.name || product.category || 'Geral'}</span>
                       {product.subcategoryId && <><span className="text-[8.5px] text-white/10">•</span><span className="text-[8.5px] font-medium text-white/20 uppercase">{subcategories.find(s => s.id === product.subcategoryId)?.name}</span></>}
-                      {product.stock < product.minStock && <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-500/10 text-[7px] font-bold text-red-500 uppercase tracking-tighter ml-1">CRÍTICO</span>}
+                      {product.stock < product.minStock && <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-red-500/10 text-[7px] font-bold text-red-500 uppercase tracking-tighter ml-1">CRÍTICO</span>} {product.variations && product.variations.length > 0 && <span className="flex items-center gap-0.5 px-1 py-0.5 rounded bg-amber-500/10 text-[7px] font-black text-amber-500 uppercase tracking-tighter ml-1">GRADE ({product.variations.length} VAR)</span>}
                       {(product.active === false || product.deleted) && <span className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-amber-500/10 text-[7px] font-bold text-amber-500 uppercase tracking-tighter ml-1">INATIVO / ARQUIVADO</span>}
                     </div>
                   </div>
                   <div className="flex lg:grid lg:items-center justify-between lg:justify-center gap-4 lg:gap-0" onClick={(e) => e.stopPropagation()}>
                     <div className="flex lg:flex flex-col lg:items-center justify-center">
-                      <div className="flex items-center gap-2">
-                        <button onClick={(e) => { e.stopPropagation(); handleQuickAdjustment(product.id, -1); }} className="w-5 h-5 rounded bg-white/5 border border-white/5 hover:bg-red-500/10 text-white/20 hover:text-red-500 transition-all flex items-center justify-center"><ArrowDownRight className="w-3 h-3" /></button>
-                        <div className="flex flex-col items-center min-w-[24px] lg:min-w-[36px]"><span className={cn("text-xs font-black tabular-nums leading-none", product.stock < product.minStock ? "text-red-500" : "text-white")}>{product.stock}</span></div>
-                        <button onClick={(e) => { e.stopPropagation(); handleQuickAdjustment(product.id, 1); }} className="w-5 h-5 rounded bg-white/5 border border-white/5 hover:bg-emerald-500/10 text-white/20 hover:text-emerald-500 transition-all flex items-center justify-center"><ArrowUpRight className="w-3 h-3" /></button>
-                      </div>
+                      {product.variations && product.variations.length > 0 ? (
+                        <div className="flex flex-col items-center">
+                          <span className={cn("text-xs font-black tabular-nums leading-none", product.stock < product.minStock ? "text-red-500" : "text-white")}>{product.stock}</span>
+                          <span className="text-[6.5px] font-black text-amber-500 uppercase tracking-widest mt-1 text-center bg-amber-500/10 px-1 py-0.5 rounded leading-none">Grade de Variação</span>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2">
+                          <button onClick={(e) => { e.stopPropagation(); handleQuickAdjustment(product.id, -1); }} className="w-5 h-5 rounded bg-white/5 border border-white/5 hover:bg-red-500/10 text-white/20 hover:text-red-500 transition-all flex items-center justify-center"><ArrowDownRight className="w-3 h-3" /></button>
+                          <div className="flex flex-col items-center min-w-[24px] lg:min-w-[36px]"><span className={cn("text-xs font-black tabular-nums leading-none", product.stock < product.minStock ? "text-red-500" : "text-white")}>{product.stock}</span></div>
+                          <button onClick={(e) => { e.stopPropagation(); handleQuickAdjustment(product.id, 1); }} className="w-5 h-5 rounded bg-white/5 border border-white/5 hover:bg-emerald-500/10 text-white/20 hover:text-emerald-500 transition-all flex items-center justify-center"><ArrowUpRight className="w-3 h-3" /></button>
+                        </div>
+                      )}
                     </div>
                     <div className="lg:hidden flex flex-wrap gap-4">
                       <div className="flex flex-col"><span className="text-[7px] uppercase font-black text-white/20 tracking-wider">Custo</span><span className="text-xs font-black text-white/40">R$ {product.costPrice.toFixed(2)}</span></div>
@@ -927,6 +976,59 @@ export default function InventoryModule() {
                       </div>
                       <input type="file" ref={extraFileInputRef} onChange={handleExtraImageChange} className="hidden" accept="image/*" />
                     </div>
+
+                    {/* MODELO 3D OPCIONAL */}
+                    <div className="space-y-2 bg-white/[0.02] p-3 rounded-xl border border-white/5">
+                      <div className="flex items-center gap-1.5 justify-between">
+                        <div className="flex items-center gap-1.5">
+                          <Layers className="w-3 h-3 text-cyan-400" />
+                          <h3 className="text-[9px] font-black uppercase text-white/40 tracking-widest">Modelo 3D Opcional</h3>
+                        </div>
+                        <span className="text-[7px] text-cyan-400 font-extrabold uppercase tracking-wider">STL/3MF/GLB/GLTF</span>
+                      </div>
+                      
+                      <div className="space-y-2">
+                        {formData.file3d ? (
+                          <div className="flex flex-col gap-2 p-2 bg-black/60 border border-white/5 rounded-lg">
+                            <div className="flex flex-col min-w-0">
+                              <span className="text-[9px] font-black text-white truncate uppercase font-mono">{formData.file3d.name}</span>
+                              <span className="text-[7px] text-zinc-500 font-mono uppercase mt-0.5">{formData.file3d.type}</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 justify-end mt-1">
+                              <button 
+                                type="button" 
+                                onClick={() => file3dInputRef.current?.click()}
+                                className="px-2 py-1 bg-white/5 border border-white/5 hover:bg-white/10 text-white rounded text-[7px] font-black uppercase tracking-wider transition-all cursor-pointer"
+                              >
+                                Substituir
+                              </button>
+                              <button 
+                                type="button" 
+                                onClick={() => setFormData(prev => ({ ...prev, file3d: undefined }))}
+                                className="px-2 py-1 bg-rose-500/10 border border-rose-500/10 hover:bg-rose-500/20 text-rose-500 rounded text-[7px] font-black uppercase tracking-wider transition-all cursor-pointer"
+                              >
+                                Remover
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <div 
+                            onClick={() => file3dInputRef.current?.click()} 
+                            className="w-full py-3.5 border border-dashed border-white/10 rounded-xl bg-white/[0.01] hover:border-cyan-500/40 hover:bg-cyan-500/5 transition-all flex flex-col items-center justify-center cursor-pointer group"
+                          >
+                            <Upload className="w-4 h-4 text-white/20 group-hover:text-cyan-400 transition-colors mb-1" />
+                            <span className="text-[7.5px] font-black uppercase text-white/30 group-hover:text-white transition-colors">Carregar Arquivo 3D</span>
+                          </div>
+                        )}
+                        <input 
+                          type="file" 
+                          ref={file3dInputRef} 
+                          onChange={handleFile3DChange} 
+                          className="hidden" 
+                          accept=".glb,.gltf,.stl,.3mf" 
+                        />
+                      </div>
+                    </div>
                     
                     <div className="space-y-2.5 bg-white/[0.02] p-3 rounded-xl border border-white/5">
                       <div className="flex items-center gap-1.5 mb-0.5">
@@ -1007,7 +1109,7 @@ export default function InventoryModule() {
                            </div>
                            <div className="space-y-0.5">
                              <label className="text-[7px] uppercase font-black text-white/20 tracking-widest ml-1">Estoque {editingProduct ? 'Atual' : 'Inicial'}</label>
-                             <input type="number" value={formData.stock} onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} className="w-full bg-black border border-white/10 rounded-xl py-1.5 px-2 text-xs text-white focus:border-amber-500/50 outline-none" />
+                             <input type="number" disabled={formData.variations && formData.variations.length > 0} value={formData.stock} onChange={(e) => setFormData({ ...formData, stock: parseInt(e.target.value) || 0 })} className="w-full bg-black border border-white/10 rounded-xl py-1.5 px-2 text-xs text-white focus:border-amber-500/50 outline-none disabled:opacity-50 disabled:bg-zinc-950 disabled:cursor-not-allowed" />
                            </div>
                            <div className="space-y-0.5">
                              <label className="text-[7px] uppercase font-black text-white/20 tracking-widest ml-1">Estoque Mín.</label>
@@ -1024,6 +1126,229 @@ export default function InventoryModule() {
                            </div>
                         </div>
                       </div>
+                    </div>
+
+                    {/* GERENCIAMENTO DE VARIAÇÕES (INDUSTRIAL GRADED) */}
+                    <div className="space-y-3 bg-white/[0.02] p-4 rounded-2xl border border-white/5 shadow-md">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="p-1.5 bg-amber-500/10 rounded-lg">
+                            <Layers className="w-4 h-4 text-amber-500" />
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase font-black text-white tracking-widest">Grade de Variações</p>
+                            <p className="text-[8px] text-white/30 font-medium font-sans">Cadastrar tamanhos, cores, acabamentos, etc.</p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (formData.variations && formData.variations.length > 0) {
+                              if (confirm("Deseja realmente limpar todas as variações deste produto? Isso removerá o estoque individual delas.")) {
+                                setFormData({ ...formData, variations: [] });
+                              }
+                            } else {
+                              setFormData({
+                                ...formData,
+                                variations: [
+                                  { id: Math.random().toString(36).substr(2, 9), sku: formData.code ? `${formData.code}-01` : '', name: 'Padrão', stock: 0 }
+                                ]
+                              });
+                            }
+                          }}
+                          className={`text-[8.5px] font-black uppercase px-2.5 py-1.5 rounded-lg border transition-all ${
+                            formData.variations && formData.variations.length > 0
+                              ? 'bg-rose-500/5 text-rose-500 border-rose-500/10 hover:bg-rose-500/10'
+                              : 'bg-amber-500/10 text-amber-500 border-amber-500/20 hover:bg-amber-500/25'
+                          }`}
+                        >
+                          {formData.variations && formData.variations.length > 0 ? 'Remover Grade' : 'Ativar Grade'}
+                        </button>
+                      </div>
+
+                      {formData.variations && formData.variations.length > 0 && (
+                        <div className="space-y-3 pt-1 border-t border-white/5">
+                          {/* Quick Generator Panel */}
+                          <div className="bg-black/40 border border-[#1a1a1a] rounded-xl p-3 space-y-2.5">
+                            <p className="text-[8px] uppercase font-black text-amber-500 tracking-wider">Gerador de Combinações Rápidas</p>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="space-y-0.5">
+                                <label className="text-[7px] uppercase font-black text-white/40 tracking-wider">Atributo (ex: Tamanho)</label>
+                                <input
+                                  type="text"
+                                  id="quick-attr-name"
+                                  placeholder="Tamanho, Cor..."
+                                  className="w-full bg-black border border-white/10 rounded-lg py-1 px-2 text-[10px] text-white focus:border-amber-500/50 outline-none"
+                                />
+                              </div>
+                              <div className="space-y-0.5">
+                                <label className="text-[7px] uppercase font-black text-white/40 tracking-wider">Valores (ex: P, M, G)</label>
+                                <input
+                                  type="text"
+                                  id="quick-attr-values"
+                                  placeholder="P, M, G..."
+                                  className="w-full bg-black border border-white/10 rounded-lg py-1 px-2 text-[10px] text-white focus:border-amber-500/50 outline-none"
+                                />
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const nameInput = document.getElementById('quick-attr-name') as HTMLInputElement;
+                                const valuesInput = document.getElementById('quick-attr-values') as HTMLInputElement;
+                                if (!nameInput || !valuesInput) return;
+                                const attrName = nameInput.value.trim();
+                                const rawValues = valuesInput.value.split(',').map(v => v.trim()).filter(Boolean);
+                                if (!attrName || rawValues.length === 0) {
+                                  alert('Informe o nome do atributo e pelo menos um valor válido.');
+                                  return;
+                                }
+
+                                let newVariations = [...formData.variations];
+                                if (newVariations.length === 1 && newVariations[0].name === 'Padrão') {
+                                  newVariations = [];
+                                }
+
+                                if (newVariations.length === 0) {
+                                  newVariations = rawValues.map((val, idx) => ({
+                                    id: Math.random().toString(36).substr(2, 9),
+                                    sku: formData.code ? `${formData.code}-${val.toUpperCase().replace(/\s+/g, '')}` : '',
+                                    name: val,
+                                    stock: 0
+                                  }));
+                                } else {
+                                  const combined: any[] = [];
+                                  newVariations.forEach(oldV => {
+                                    rawValues.forEach(val => {
+                                      const combinedName = `${oldV.name} / ${val}`;
+                                      combined.push({
+                                        id: Math.random().toString(36).substr(2, 9),
+                                        sku: formData.code ? `${formData.code}-${combinedName.toUpperCase().replace(/[\s\/]+/g, '')}` : '',
+                                        name: combinedName,
+                                        stock: oldV.stock || 0,
+                                        price: oldV.price,
+                                        wholesalePrice: oldV.wholesalePrice,
+                                        costPrice: oldV.costPrice
+                                      });
+                                    });
+                                  });
+                                  newVariations = combined;
+                                }
+
+                                setFormData({ ...formData, variations: newVariations });
+                                nameInput.value = '';
+                                valuesInput.value = '';
+                              }}
+                              className="w-full bg-white/5 hover:bg-white/10 active:bg-white/15 text-white border border-white/10 text-[8px] font-black uppercase py-1.5 rounded-lg transition-all"
+                            >
+                              + Combinar com Atributo
+                            </button>
+                          </div>
+
+                          {/* Variations Table/List */}
+                          <div className="space-y-1.5 max-h-[180px] overflow-y-auto pr-1">
+                            {formData.variations.map((v, idx) => (
+                              <div key={v.id || idx} className="grid grid-cols-12 gap-1.5 items-center p-2 bg-black border border-white/5 rounded-xl">
+                                <div className="col-span-4 space-y-0.5">
+                                  <label className="text-[5.5px] uppercase font-black text-white/30 tracking-widest pl-0.5">Variação / Descrição</label>
+                                  <input
+                                    type="text"
+                                    value={v.name}
+                                    onChange={(e) => {
+                                      const updated = formData.variations.map((item, index) =>
+                                        index === idx ? { ...item, name: e.target.value } : item
+                                      );
+                                      setFormData({ ...formData, variations: updated });
+                                    }}
+                                    className="w-full bg-black/60 border border-white/10 rounded-lg py-1 px-1.5 text-[10px] text-white focus:border-amber-500/50 outline-none"
+                                    placeholder="G / Azul"
+                                  />
+                                </div>
+                                <div className="col-span-3 space-y-0.5">
+                                  <label className="text-[5.5px] uppercase font-black text-white/30 tracking-widest pl-0.5">SKU / Código</label>
+                                  <input
+                                    type="text"
+                                    value={v.sku}
+                                    onChange={(e) => {
+                                      const updated = formData.variations.map((item, index) =>
+                                        index === idx ? { ...item, sku: e.target.value } : item
+                                      );
+                                      setFormData({ ...formData, variations: updated });
+                                    }}
+                                    className="w-full bg-black/60 border border-white/10 rounded-lg py-1 px-1.5 text-[9px] font-mono text-amber-500 focus:border-amber-500/50 outline-none"
+                                    placeholder="SKU"
+                                  />
+                                </div>
+                                <div className="col-span-2 space-y-0.5">
+                                  <label className="text-[5.5px] uppercase font-black text-white/30 tracking-widest pl-0.5">Estoque</label>
+                                  <input
+                                    type="number"
+                                    value={v.stock}
+                                    onChange={(e) => {
+                                      const updated = formData.variations.map((item, index) =>
+                                        index === idx ? { ...item, stock: parseInt(e.target.value) || 0 } : item
+                                      );
+                                      setFormData({ ...formData, variations: updated });
+                                    }}
+                                    className="w-full bg-black/60 border border-white/10 rounded-lg py-1 px-1 text-[10px] text-white text-center focus:border-amber-500/50 outline-none font-bold"
+                                  />
+                                </div>
+                                <div className="col-span-2 space-y-0.5">
+                                  <label className="text-[5.5px] uppercase font-black text-white/30 tracking-widest pl-0.5">Preço (R$)</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={v.price || ''}
+                                    onChange={(e) => {
+                                      const updated = formData.variations.map((item, index) =>
+                                        index === idx ? { ...item, price: parseFloat(e.target.value) || undefined } : item
+                                      );
+                                      setFormData({ ...formData, variations: updated });
+                                    }}
+                                    className="w-full bg-black/60 border border-white/10 rounded-lg py-1 px-1 text-[9px] text-white/60 focus:border-amber-500/50 outline-none"
+                                    placeholder={formData.price ? formData.price.toFixed(2) : '0.00'}
+                                  />
+                                </div>
+                                <div className="col-span-1 pt-3 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      const updated = formData.variations.filter((_, index) => index !== idx);
+                                      setFormData({ ...formData, variations: updated });
+                                    }}
+                                    className="p-1 text-rose-500 hover:bg-rose-500/10 rounded-md transition-all inline-block mt-1"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const newIndex = formData.variations.length + 1;
+                              const suffix = newIndex < 10 ? `0${newIndex}` : `${newIndex}`;
+                              setFormData({
+                                ...formData,
+                                variations: [
+                                  ...formData.variations,
+                                  {
+                                    id: Math.random().toString(36).substr(2, 9),
+                                    sku: formData.code ? `${formData.code}-${suffix}` : '',
+                                    name: `Grade ${newIndex}`,
+                                    stock: 0
+                                  }
+                                ]
+                              });
+                            }}
+                            className="w-full bg-amber-500/10 hover:bg-amber-500/15 active:bg-amber-500/20 text-amber-500 border border-amber-500/20 text-[8px] font-black uppercase py-1.5 rounded-lg transition-all"
+                          >
+                            + Adicionar Variação Manual
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-0.5">

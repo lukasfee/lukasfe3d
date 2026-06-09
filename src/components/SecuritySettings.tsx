@@ -178,13 +178,22 @@ export function SecuritySettings({
   const handleConnectGDrive = async () => {
     try {
       setIsLoadingCloud(true);
+      const isElectron = typeof window !== 'undefined' && !!(window as any).electron;
+      if (isElectron) {
+        alert('Abrimos o navegador para conectar ao Google Drive.');
+      }
       const success = await GoogleDriveService.connect(false);
       if (success) {
         const list = await GoogleDriveService.listCloudBackups();
         setCloudBackups(list);
+        alert('Google Drive conectado com sucesso.');
+      } else {
+        const lastErr = GoogleDriveService.getLastError();
+        alert('Não foi possível conectar ao Google Drive.' + (lastErr ? '\nMotivo: ' + lastErr : ''));
       }
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      alert('Não foi possível conectar ao Google Drive.\nErro: ' + e.message);
     } finally {
       setIsLoadingCloud(false);
     }
@@ -207,14 +216,21 @@ export function SecuritySettings({
     if (window.confirm('Deseja conectar uma conta diferente do Google Drive?\n\nSua sessão atual será encerrada e você poderá selecionar manualmente qualquer outra conta e conceder autorização.')) {
       try {
         setIsLoadingCloud(true);
+        const isElectron = typeof window !== 'undefined' && !!(window as any).electron;
+        if (isElectron) {
+          alert('Abrimos o navegador para conectar ao Google Drive.');
+        }
         const success = await GoogleDriveService.switchAccount();
         if (success) {
           const list = await GoogleDriveService.listCloudBackups();
           setCloudBackups(list);
-          alert('Conta Google alterada e sincronizada com sucesso!');
+          alert('Google Drive conectado com sucesso.');
+        } else {
+          const lastErr = GoogleDriveService.getLastError();
+          alert('Não foi possível conectar ao Google Drive.' + (lastErr ? '\nMotivo: ' + lastErr : ''));
         }
       } catch (err: any) {
-        alert('Falha ao alternar conta Google: ' + err.message);
+        alert('Não foi possível conectar ao Google Drive.\nErro: ' + err.message);
       } finally {
         setIsLoadingCloud(false);
       }

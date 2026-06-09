@@ -7,6 +7,8 @@ contextBridge.exposeInMainWorld('electron', {
     return ipcRenderer.invoke('check-file-exists', filePath);
   },
   clearDebugDumps: () => ipcRenderer.invoke('clear-debug-dumps'),
+  googleDriveConnect: (args) => ipcRenderer.invoke('google-drive:connect', args),
+  googleDriveRefresh: (args) => ipcRenderer.invoke('google-drive:refresh', args),
   getLocalIP: () => ipcRenderer.invoke('get-local-ip'),
   startLocalServer: (port) => {
     const parsed = parseInt(port, 10);
@@ -22,6 +24,12 @@ contextBridge.exposeInMainWorld('electron', {
   savePdfDialog: (options) => ipcRenderer.invoke('save-pdf-dialog', options),
   checkForUpdates: () => ipcRenderer.invoke('check-for-updates'),
   restartApp: () => ipcRenderer.invoke('restart-app'),
+  onAppCloseTriggered: (callback) => {
+    const listener = (_, data) => callback(data);
+    ipcRenderer.on('app-close-triggered', listener);
+    return () => ipcRenderer.removeListener('app-close-triggered', listener);
+  },
+  forceQuit: () => ipcRenderer.invoke('app:force-quit'),
   generatePairingPin: () => ipcRenderer.invoke('generate-pairing-pin'),
   getPairingPin: () => ipcRenderer.invoke('get-pairing-pin'),
   getLocalDevices: () => ipcRenderer.invoke('get-local-devices'),
