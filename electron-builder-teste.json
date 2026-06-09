@@ -1,0 +1,22 @@
+{
+  "appId": "com.nexaerp.industrial",
+  "productName": "Nexa ERP Teste",
+  "directories": {
+    "output": "release-teste"
+  },
+  "publish": null,
+  "files": [
+    "dist/**/*",
+    "electron/**/*",
+    "package.json"
+  ],
+  "asar": true,
+  "asarUnpack": [],
+  "nsis": {
+    "oneClick": false,
+    "allowToChangeInstallationDirectory": true
+  },
+  "win": {
+    "target": "nsis"
+  }
+}

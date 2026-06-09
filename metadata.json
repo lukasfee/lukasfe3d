@@ -1,0 +1,8 @@
+{
+  "name": "Nexa ERP Industrial",
+  "description": "Sistema de gestão integrado industrial moderno Nexa com módulos operacionais e de governança.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

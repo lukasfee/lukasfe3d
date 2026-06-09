@@ -1,0 +1,600 @@
+
+/* COMMON SELECTOR FOR ALL PRINTABLE THEMES */
+.themeable-receipt {
+  position: relative;
+  overflow: visible;
+  box-sizing: border-box;
+}
+
+/* Ensure themes don't bleed out on fixed paper sizes (A4/A5/A6) */
+.themeable-receipt.paper-a4,
+.themeable-receipt.paper-a5,
+.themeable-receipt.paper-a6 {
+  overflow: hidden;
+}
+
+.theme-decoration-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+}
+
+.receipt-content-wrapper,
+.ticket-content-wrapper {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  height: 100%;
+}
+
+.theme-deco {
+  position: absolute;
+  line-height: 1;
+  user-select: none;
+  filter: saturate(1.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.deco-soft {
+  opacity: 0.22;
+}
+
+.deco-faint {
+  opacity: 0.12;
+}
+
+.deco-xl {
+  font-size: calc(28px * var(--receipt-font-scale, 1));
+}
+
+.deco-lg {
+  font-size: calc(22px * var(--receipt-font-scale, 1));
+}
+
+.deco-md {
+  font-size: calc(17px * var(--receipt-font-scale, 1));
+}
+
+.deco-sm {
+  font-size: calc(13px * var(--receipt-font-scale, 1));
+}
+
+.deco-xs {
+  font-size: calc(10px * var(--receipt-font-scale, 1));
+}
+
+.rotate-left {
+  transform: rotate(-12deg);
+}
+
+.rotate-right {
+  transform: rotate(12deg);
+}
+
+.deco-top-left {
+  top: calc(7mm * var(--receipt-font-scale, 1));
+  left: calc(3mm * var(--receipt-font-scale, 1));
+}
+
+.deco-top-right-safe {
+  top: calc(18mm * var(--receipt-font-scale, 1));
+  right: calc(4mm * var(--receipt-font-scale, 1));
+}
+
+.deco-left-mid {
+  top: 38%;
+  left: calc(2mm * var(--receipt-font-scale, 1));
+}
+
+.deco-right-mid {
+  top: 45%;
+  right: calc(2mm * var(--receipt-font-scale, 1));
+}
+
+.deco-bottom-left {
+  bottom: calc(22mm * var(--receipt-font-scale, 1));
+  left: calc(4mm * var(--receipt-font-scale, 1));
+}
+
+.deco-bottom-right {
+  bottom: calc(14mm * var(--receipt-font-scale, 1));
+  right: calc(4mm * var(--receipt-font-scale, 1));
+}
+
+.deco-scatter-1 {
+  top: 28%;
+  left: 18%;
+}
+
+.deco-scatter-2 {
+  top: 58%;
+  right: 16%;
+}
+
+.deco-scatter-3 {
+  bottom: 31%;
+  left: 42%;
+}
+
+.deco-scatter-4 {
+  top: 70%;
+  left: 12%;
+}
+
+.deco-top-banner {
+  top: calc(1.5mm * var(--receipt-font-scale, 1));
+  left: calc(8mm * var(--receipt-font-scale, 1));
+  right: calc(8mm * var(--receipt-font-scale, 1));
+  text-align: center;
+  font-size: calc(10px * var(--receipt-font-scale, 1));
+  letter-spacing: calc(2px * var(--receipt-font-scale, 1));
+  opacity: 0.18;
+}
+
+/* TEMA CARNAVAL */
+.themeable-receipt.template-carnival {
+  background: radial-gradient(circle at 10% 10%, rgba(255, 199, 44, 0.08), transparent 25%),
+              radial-gradient(circle at 90% 90%, rgba(245, 58, 142, 0.08), transparent 25%),
+              #fffdf5 !important;
+  color: #111 !important;
+  border: 1px solid #fcd34d !important;
+}
+
+/* TEMA BLACK FRIDAY */
+.themeable-receipt.template-blackfriday {
+  background: #fffdf5 !important;
+  color: #111 !important;
+  border: 2px solid #111 !important;
+}
+
+/* TEMA NATAL */
+.themeable-receipt.template-christmas {
+  background-image: 
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23b91c1c' stroke-width='0.6' opacity='0.12'><path d='M10 0v15M30 0v10M20 0v20'/><circle cx='10' cy='17' r='2'/><circle cx='30' cy='12' r='2'/><rect x='18' y='20' width='4' height='4' rx='1'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%2315803d' stroke-width='0.6' opacity='0.1'><path d='M20 10l-4 4h8l-4-4zm0 4l-5 5h10l-5-5zm0 5l-6 6h12l-6-6zm0 6v3'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23b91c1c' stroke-width='0.6' opacity='0.08'><rect x='10' y='25' width='10' height='10' rx='1'/><path d='M10 30h10M15 25v10M12 25l3-3 3 3'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60' fill='none' opacity='0.018'><circle cx='15' cy='15' r='2' fill='%23b91c1c'/><circle cx='45' cy='45' r='1.5' fill='%2316a34a'/><path d='M30 10l2 4 4 2-4 2-2 4-2-4-4-2 4-2zM15 45l1 2 2 1-2 1-1 2-1-2-2-1 2-1z' fill='%23b91c1c'/></svg>"),
+    radial-gradient(circle at 50% 0%, rgba(190, 40, 40, 0.05), transparent 40%) !important;
+  background-position: top center, bottom right, bottom left, center center, center !important;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat !important;
+  background-size: 80px 20px, 45px 45px, 45px 45px, 60px 60px, auto !important;
+  background-color: #fffcf8 !important;
+  color: #111 !important;
+  border: 1.5mm double rgba(190, 40, 40, 0.15) !important;
+  position: relative !important;
+}
+
+/* TEMA HALLOWEEN */
+.themeable-receipt.template-halloween {
+  background-image: 
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30' fill='none' stroke='%237c3aed' stroke-width='0.5' opacity='0.12'><path d='M0 0l30 30M0 0l30 15M0 0l15 30M3 0a27 27 0 0 1 27 27M8 0a22 22 0 0 1 22 22'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23ea580c' stroke-width='0.6' opacity='0.12'><path d='M20 30a7 7 0 1 1 0-14 7 7 0 0 1 0 14zm0-14c1-2 2-3 4-3s-2 3-4 3z'/><path d='M16 21l2 2m4-2l-2 2m-2-1h4M17 25s1 1.5 3 1.5 3-1.5 3-1.5' stroke-linecap='round'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%237c3aed' stroke-width='0.6' opacity='0.08'><path d='M10 25c-3-2-5-2-8-1 0 4 3 6 5 4-1 2-2 3-4 3' stroke-linecap='round'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='100' height='100' viewBox='0 0 100 100' fill='none' opacity='0.015'><path d='M0 0l100 100M0 100l100-100' stroke='%237c3aed' stroke-width='0.5'/><circle cx='50' cy='50' r='30' stroke='%237c3aed' stroke-width='0.5' stroke-dasharray='4,4'/></svg>"),
+    radial-gradient(circle at 5% 5%, rgba(249, 115, 22, 0.08), transparent 30%) !important;
+  background-position: top left, bottom right, top right, center center, center !important;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat !important;
+  background-size: 55px 55px, 55px 55px, 55px 55px, 100px 100px, auto !important;
+  background-color: #fffaf0 !important;
+  color: #111 !important;
+  border: 1px solid #f97316 !important;
+  position: relative !important;
+}
+
+/* CYBER MONDAY */
+.themeable-receipt.template-cyber-monday {
+  background: #0a0a0f !important;
+  color: #00f2ff !important;
+  border: 1px solid #00f2ff !important;
+}
+
+/* DIA DA MULHER */
+.themeable-receipt.template-dia-mulher {
+  background: radial-gradient(circle at 100% 0%, rgba(219, 39, 119, 0.08), transparent 35%),
+              #fffcfd !important;
+  color: #be185d !important;
+  border: 1px solid #fbcfe8 !important;
+}
+
+/* DIA DAS CRIANÇAS */
+.themeable-receipt.template-dia-criancas {
+  background: radial-gradient(circle at 0% 0%, rgba(3, 105, 161, 0.05), transparent 40%),
+              radial-gradient(circle at 100% 100%, rgba(251, 191, 36, 0.05), transparent 40%),
+              #f0f9ff !important;
+  color: #0369a1 !important;
+  border: 1px solid #bae6fd !important;
+}
+
+/* DIA DAS MÃES */
+.themeable-receipt.template-dia-maes {
+  background: radial-gradient(circle at 50% 0%, rgba(190, 24, 93, 0.06), transparent 50%),
+              #fffafb !important;
+  color: #be185d !important;
+  border: 1px solid #fce7f3 !important;
+}
+
+/* DIA DO CONSUMIDOR */
+.themeable-receipt.template-dia-consumidor {
+  background: radial-gradient(circle at 100% 0%, rgba(114, 192, 44, 0.05), transparent 40%),
+              radial-gradient(circle at 0% 100%, rgba(11, 65, 146, 0.04), transparent 40%),
+              #ffffff !important;
+  color: #0f172a !important;
+  border: 1.25mm solid #0b4192 !important;
+}
+
+/* DIA DO TRABALHADOR */
+.themeable-receipt.template-dia-trabalhador {
+  background: radial-gradient(circle at 100% 0%, rgba(250, 204, 21, 0.05), transparent 40%),
+              radial-gradient(circle at 0% 100%, rgba(11, 65, 146, 0.04), transparent 40%),
+              #ffffff !important;
+  color: #0f172a !important;
+  border: 1.25mm solid #0b4192 !important;
+}
+
+/* DIA DOS NAMORADOS */
+.themeable-receipt.template-dia-namorados {
+  background: radial-gradient(circle at 50% 10%, rgba(225, 29, 72, 0.06), transparent 40%),
+              #fffafb !important;
+  color: #e11d48 !important;
+  border: 1px solid #fecdd3 !important;
+}
+
+/* DIA DOS PAIS */
+.themeable-receipt.template-dia-pais {
+  background: radial-gradient(circle at 0% 0%, rgba(30, 41, 59, 0.05), transparent 30%),
+              #f8fafc !important;
+  color: #1e293b !important;
+  border: 1px solid #cbd5e1 !important;
+}
+
+/* FESTA JUNINA & SÃO JOÃO */
+.themeable-receipt.template-festa-junina,
+.themeable-receipt.template-sao-joao {
+  background-image: 
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 50 15' fill='none' stroke='%23ea580c' stroke-width='0.6' opacity='0.12'><path d='M0 3c15 5 35 5 50 0M5 5v5l2.5-1.5L10 10V5zm15 1v5l2.5-1.5L20 11V6zm15-2v5l2.5-1.5L35 9V4z'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23ea580c' stroke-width='0.6' opacity='0.1'><path d='M10 32l20-8M30 32l-20-8'/><path d='M20 28c3-8 8-12 5-20c-3 4-7 8-7 12z' fill='%23ea580c' fill-opacity='0.15'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23f59e0b' stroke-width='0.6' opacity='0.08'><rect x='15' y='12' width='10' height='16' rx='3' stroke-dasharray='1 1'/><path d='M13 28c2-6 5-10 5-12 M27 28c-2-6-5-10-5-12'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='80' height='80' viewBox='0 0 80 80' fill='none' opacity='0.022'><path d='M10 10l5 7 5-7M30 10c2 3 5 6 2 9-2 2-5 1-6-2s1-6 4-7zM50 15c2 4 4 8 1 12-2 3-6 2-7-1s1-7 5-8z' stroke='%23f59e0b' stroke-width='1'/></svg>"),
+    radial-gradient(circle at 50% 100%, rgba(249, 115, 22, 0.08), transparent 40%) !important;
+  background-position: top center, bottom left, bottom right, center center, center !important;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat !important;
+  background-size: 100px 30px, 55px 55px, 55px 55px, 80px 80px, auto !important;
+  background-color: #fffef0 !important;
+  color: #c2410c !important;
+  border: 1px solid #fed7aa !important;
+  position: relative !important;
+}
+
+/* PÁSCOA */
+.themeable-receipt.template-pascoa {
+  background-image: 
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23f87171' stroke-width='0.6' opacity='0.08'><path d='M8 20c0-5 2-10 4-13c2-2 3 0 3 4s-2 6-4 8 M16 20c0-5 2-10 4-13c2-2 3 0 3 4s-2 6-4 8'/><path d='M6 24c0-5 5-7 9-7s9 2 9 7c0 3-3 6-9 6s-9-3-9-6z'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23f87171' stroke-width='0.6' opacity='0.08'><ellipse cx='20' cy='20' rx='7' ry='10'/><path d='M15 18c2-2 4-2 6 0 M14 21c3 1 6 1 8-1' stroke-dasharray='1 1'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23f87171' stroke-width='0.6' opacity='0.08'><circle cx='20' cy='25' r='3'/><path d='M20 15v7M17 18l6 3M23 18l-6 3'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60' fill='none' stroke='%23f87171' stroke-width='0.6' opacity='0.03'><path d='M12 28c1.5 0 3-1.5 3-4s-1-6-3-6-3 4-3 6 1 4 3 4zm24 0c1.5 0 3-1.5 3-4s-1-6-3-6-3 4-3 6 1 4 3 4zm-12 16c2 0 4-1.5 4-4s-1.5-6-4-6-4 4-4 6 1.5 4 4 4z'/></svg>"),
+    radial-gradient(circle at 100% 10%, rgba(124, 58, 237, 0.06), transparent 35%) !important;
+  background-position: top left, top right, bottom left, center center, center !important;
+  background-repeat: no-repeat, no-repeat, no-repeat, repeat, no-repeat !important;
+  background-size: 55px 55px, 55px 55px, 55px 55px, 60px 60px, auto !important;
+  background-color: #fafaff !important;
+  color: #7c3aed !important;
+  border: 1px solid #ddd6fe !important;
+  position: relative !important;
+}
+
+/* FOLCLORE */
+.themeable-receipt.template-folclore {
+  background-image: 
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%2315803d' stroke-width='0.6' opacity='0.12'><path d='M20 15c5 0 8-5 8-10M20 15c-5 0-8-5-8-10M20 15v15M20 25c-4 2-5 5-5 5 M20 25c4 2 5 5 5 5'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40' fill='none' stroke='%23ca8a04' stroke-width='0.6' opacity='0.08'><circle cx='20' cy='20' r='5' stroke-dasharray='1 1'/><path d='M10 20h20M20 10v20'/></svg>"),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='60' height='60' viewBox='0 0 60 60' fill='none' opacity='0.022'><path d='M10 50s12-4 14-14c0 0-6 8-14 10zm25-30s12-4 14-14c0 0-6 8-14 10z' stroke='%2315803d' stroke-width='0.5'/></svg>"),
+    radial-gradient(circle at 50% 0%, rgba(21, 128, 61, 0.05), transparent 45%) !important;
+  background-position: top left, bottom right, center center, center !important;
+  background-repeat: no-repeat, no-repeat, repeat, no-repeat !important;
+  background-size: 50px 50px, 50px 50px, 60px 60px, auto !important;
+  background-color: #fefce8 !important;
+  color: #422006 !important;
+  border: 1px solid #ca8a04 !important;
+  position: relative !important;
+}
+
+
+/* LUXO PREMIUM */
+.themeable-receipt.template-luxury {
+  border: 2mm double #d4af37 !important; background: #fff !important;
+  color: #111 !important;
+}
+.themeable-receipt.template-luxury .grand-total { background: #d4af37 !important; color: #000 !important; }
+
+/* ADAPTING COMMON FIELDS FOR THEMES */
+.themeable-receipt.template-blackfriday .grand-total { background: #111 !important; color: #ffcc00 !important; border: 1px solid #ffcc00; }
+.themeable-receipt.template-blackfriday .divider { border-top: 1.5px dashed #ffcc00 !important; }
+
+.themeable-receipt.template-christmas .grand-total { background: linear-gradient(180deg, #9b141b 0%, #7d0f14 100%) !important; color: #fff !important; border: 1px solid #d7aa35 !important; }
+.themeable-receipt.template-christmas .divider { border-top: 2px dashed #9b141b !important; }
+
+.themeable-receipt.template-halloween .grand-total { background: #000 !important; color: #ff6a00 !important; border: 1.2px solid #ff6a00; }
+.themeable-receipt.template-halloween .divider { border-top: 2px dashed #ff6a00 !important; }
+
+.themeable-receipt.template-cyberpunk { background: #050505 !important; color: #00ff9f !important; border: 1px solid #00ff9f !important; }
+.themeable-receipt.template-cyberpunk .grand-total { background: #ff00ff !important; color: #000 !important; }
+
+.themeable-receipt.template-cyber-monday .grand-total { background: #00f2ff !important; color: #000 !important; }
+.themeable-receipt.template-dia-mulher .grand-total { background: #d10069 !important; color: #fff !important; }
+.themeable-receipt.template-dia-criancas .grand-total { background: #fbbf24 !important; color: #000 !important; border-radius: 20px !important; }
+.themeable-receipt.template-dia-maes .grand-total { background: #be185d !important; color: #fff !important; }
+.themeable-receipt.template-dia-consumidor .grand-total { background: #22c55e !important; color: #fff !important; }
+.themeable-receipt.template-dia-trabalhador .grand-total { background: #334155 !important; color: #fff !important; border: 2px solid #000 !important; }
+.themeable-receipt.template-dia-namorados .grand-total { background: #e11d48 !important; color: #fff !important; border-radius: 12px !important; }
+.themeable-receipt.template-dia-pais .grand-total { background: #1e293b !important; color: #fff !important; }
+.themeable-receipt.template-festa-junina .grand-total { background: #f97316 !important; color: #fff !important; border: 2px dashed #fff !important; }
+.themeable-receipt.template-pascoa .grand-total { background: #a855f7 !important; color: #fff !important; }
+
+/* TEMA ANIVERSÁRIO DA LOJA */
+
+.themeable-receipt.template-birthday {
+  background:
+    radial-gradient(circle at 12% 10%, rgba(212, 175, 55, 0.14), transparent 18%),
+    radial-gradient(circle at 88% 15%, rgba(34, 197, 94, 0.10), transparent 18%),
+    radial-gradient(circle at 15% 88%, rgba(212, 175, 55, 0.12), transparent 20%),
+    linear-gradient(180deg, #fffef8 0%, #f9f5e8 100%) !important;
+  color: #1f2933 !important;
+  border: 1px solid rgba(212, 175, 55, 0.45) !important;
+  print-color-adjust: exact;
+  -webkit-print-color-adjust: exact;
+}
+
+.themeable-receipt.template-birthday .divider {
+  border-top-color: rgba(26, 122, 76, 0.75) !important;
+}
+
+.themeable-receipt.template-birthday .logo-box,
+.themeable-receipt.template-birthday .qr-code-wrapper,
+.themeable-receipt.template-birthday .items-box,
+.themeable-receipt.template-birthday .payment-box {
+  border-color: #1a7a4c !important;
+}
+
+.themeable-receipt.template-birthday .company-name,
+.themeable-receipt.template-birthday .info-label,
+.themeable-receipt.template-birthday .title-text,
+.themeable-receipt.template-birthday .summary-value.green,
+.themeable-receipt.template-birthday .items-count,
+.themeable-receipt.template-birthday .qr-text,
+.themeable-receipt.template-birthday .contact-icon {
+  color: #1a7a4c !important;
+}
+
+.themeable-receipt.template-birthday .grand-total {
+  border: 2px solid #1a7a4c !important;
+  background: linear-gradient(90deg, rgba(255,255,255,0.94), rgba(255,250,230,0.98)) !important;
+  box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.25);
+}
+
+.themeable-receipt.template-birthday .total-value {
+  color: #1a7a4c !important;
+}
+
+.themeable-receipt.template-birthday .thank-subtitle {
+  color: #d4af37 !important;
+}
+
+.birthday-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.birthday-confetti {
+  position: absolute;
+  inset: 0;
+  background-image:
+    radial-gradient(circle, rgba(212, 175, 55, 0.55) 0 1.2px, transparent 1.5px),
+    radial-gradient(circle, rgba(26, 122, 76, 0.35) 0 1px, transparent 1.3px),
+    radial-gradient(circle, rgba(255, 190, 80, 0.35) 0 1px, transparent 1.2px);
+  background-size: 18mm 22mm, 26mm 20mm, 14mm 18mm;
+  background-position: 2mm 4mm, 11mm 16mm, 7mm 28mm;
+  opacity: 0.28;
+}
+
+.birthday-ribbon {
+  position: absolute;
+  top: 1.5mm;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 1mm 4mm;
+  border-radius: 999px;
+  background: rgba(26, 122, 76, 0.10);
+  border: 1px solid rgba(212, 175, 55, 0.45);
+  color: #1a7a4c;
+  font-size: 7px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+.birthday-balloon,
+.birthday-cake,
+.birthday-gift,
+.birthday-sparkle {
+  position: absolute;
+  line-height: 1;
+  user-select: none;
+}
+
+.birthday-balloon {
+  font-size: calc(24px * var(--receipt-font-scale, 1));
+  opacity: 0.24;
+}
+
+.balloon-1 {
+  top: calc(11mm * var(--receipt-font-scale, 1));
+  left: calc(2mm * var(--receipt-font-scale, 1));
+  transform: rotate(-12deg);
+}
+
+.balloon-2 {
+  top: calc(30mm * var(--receipt-font-scale, 1));
+  right: calc(2mm * var(--receipt-font-scale, 1));
+  transform: rotate(10deg);
+}
+
+.balloon-3 {
+  bottom: calc(42mm * var(--receipt-font-scale, 1));
+  left: calc(2mm * var(--receipt-font-scale, 1));
+  transform: rotate(8deg);
+}
+
+.balloon-4 {
+  bottom: calc(24mm * var(--receipt-font-scale, 1));
+  right: calc(3mm * var(--receipt-font-scale, 1));
+  transform: rotate(-10deg);
+}
+
+.birthday-cake {
+  font-size: calc(24px * var(--receipt-font-scale, 1));
+  opacity: 0.18;
+}
+
+.cake-top {
+  top: calc(55mm * var(--receipt-font-scale, 1));
+  left: calc(3mm * var(--receipt-font-scale, 1));
+  transform: rotate(-8deg);
+}
+
+.birthday-gift {
+  font-size: calc(21px * var(--receipt-font-scale, 1));
+  opacity: 0.20;
+}
+
+.gift-left {
+  bottom: calc(18mm * var(--receipt-font-scale, 1));
+  left: calc(5mm * var(--receipt-font-scale, 1));
+  transform: rotate(10deg);
+}
+
+.gift-right {
+  bottom: calc(17mm * var(--receipt-font-scale, 1));
+  right: calc(5mm * var(--receipt-font-scale, 1));
+  transform: rotate(-10deg);
+}
+
+.birthday-sparkle {
+  color: #d4af37;
+  opacity: 0.30;
+  font-size: calc(13px * var(--receipt-font-scale, 1));
+}
+
+.sparkle-1 {
+  top: 23mm;
+  left: 28%;
+}
+
+.sparkle-2 {
+  top: 44mm;
+  right: 24%;
+}
+
+.sparkle-3 {
+  bottom: calc(50mm * var(--receipt-font-scale, 1));
+  left: 36%;
+}
+
+.sparkle-4 {
+  bottom: calc(29mm * var(--receipt-font-scale, 1));
+  right: 32%;
+}
+
+.themeable-receipt.paper-a6 .birthday-balloon,
+.themeable-receipt.paper-a4 .birthday-balloon {
+  opacity: 0.18;
+}
+
+/* ==========================================================================
+   UNIFIED ROOT & SAFE AREA PHYSICAL LAYOUT SYSTEMS (PREVIEW, PDF, PRINT)
+   ========================================================================== */
+
+.document-paper-root {
+  position: relative !important;
+  width: var(--paper-width) !important;
+  min-height: var(--paper-height) !important;
+  margin: 0 auto !important;
+  padding: 0 !important;
+  box-sizing: border-box !important;
+  overflow: hidden !important;
+  background: white;
+  transition: none !important;
+}
+
+.document-content-layer {
+  position: relative !important;
+  z-index: 10 !important;
+  box-sizing: border-box !important;
+  padding: var(--safe-area) !important;
+  background: transparent !important;
+  width: 100% !important;
+}
+
+.document-content-layer.show-safe-area-guide {
+  outline: 1.0px dashed #10b981 !important;
+  outline-offset: -1px !important;
+  z-index: 50 !important;
+}
+
+/* Scoped Table Sizing to Prevent Cutoffs/Overflows Globally */
+.document-paper-root table {
+  width: 100% !important;
+  table-layout: fixed !important;
+  border-collapse: collapse !important;
+}
+
+.document-paper-root td, 
+.document-paper-root th {
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+/* Left/Right Safe Margins for Values & Columns */
+.document-paper-root td:last-child,
+.document-paper-root th:last-child {
+  padding-right: 2px !important;
+}
+
+.document-paper-root td:first-child,
+.document-paper-root th:first-child {
+  padding-left: 2px !important;
+}
+
+/* Global Print Overrides to Eliminate Artificial/Decorative Borders and Shadows */
+@media print {
+  * {
+    box-shadow: none !important;
+    text-shadow: none !important;
+    outline: none !important;
+  }
+  
+  .document-paper-root,
+  .themeable-receipt,
+  .receipt-a6-data,
+  .receipt-a6,
+  div[class*="receipt-container"] {
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+  }
+
+  .show-safe-area-guide,
+  .document-content-layer.show-safe-area-guide {
+    outline: none !important;
+  }
+}
+
